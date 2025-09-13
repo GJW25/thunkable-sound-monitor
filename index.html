@@ -221,7 +221,7 @@
                 Noise Disturbance 
                 <span class="info-icon" data-tooltip-id="tooltip-disturbance">?</span>
             </h2>
-            <div class="tooltip" id="tooltip-disturbance">This bar shows the current disturbance level, calculated from recent loud sounds. The red line is the trigger level.</div>
+            <div class="tooltip" id="tooltip-disturbance">Disturbance is a combination of the volume and duration of recent sounds.</div>
 
             <div id="displayArea">
                 <div id="visualizerContainer">
@@ -240,7 +240,7 @@
                         <input type="range" id="triggerSlider" min="10" max="95" value="50">
                         <span class="info-icon" data-tooltip-id="tooltip-trigger">?</span>
                     </div>
-                    <div class="tooltip" id="tooltip-trigger">Sets the disturbance level (red line) required to activate sound. A lower value is more sensitive.</div>
+                    <div class="tooltip" id="tooltip-trigger">Sets the disturbance level (line on the bar) required to activate sound. A lower value is more sensitive.</div>
                 </div>
                 <div class="control-group">
                     <label for="sensitivitySlider">Sensitivity: <span id="sensitivityValue">50</span></label>
@@ -500,7 +500,7 @@
 
         function stopPlaybackAndMonitoring() {
             isMonitoring = false;
-            cleanupAudioNodes(); // Use the safe cleanup function
+            cleanupAudioNodes();
             if (inactivityTimer) {
                 clearTimeout(inactivityTimer);
                 inactivityTimer = null;
@@ -633,7 +633,7 @@
         }
 
         function cleanupAudioNodes() {
-            clearAllTimeouts(); // Clear any pending state changes
+            clearAllTimeouts(); 
             decayEndTime = null;
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
