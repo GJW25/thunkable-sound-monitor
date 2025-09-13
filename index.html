@@ -14,6 +14,7 @@
             align-items: center;
             height: 90vh;
             overflow: hidden;
+            margin: 0;
         }
         #shushMessage {
             display: none; 
@@ -69,6 +70,14 @@
             bottom: 50%; /* Fixed position for the 50% disturbance trigger */
             transition: bottom 0.2s ease;
         }
+        /* New version number style */
+        #versionNumber {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            font-size: 0.7em;
+            color: #555;
+        }
     </style>
 </head>
 <body>
@@ -83,6 +92,8 @@
         </div>
         <div id="shushMessage">Shusssshhhhh</div>
     </div>
+
+    <div id="versionNumber">v1.6</div>
     
     <script>
         // --- CONFIGURATION & STATE VARIABLES ---
@@ -90,16 +101,14 @@
         let breachRecords = [];   // Stores recent sound breaches { timestamp, magnitude }
         let isShushing = false;   // Flag to prevent the "shush" message from re-triggering while visible
         
-        // This constant helps normalize the disturbance score to a 0-100 scale.
-        // Increased to make the algorithm less sensitive.
         const MAX_DISTURBANCE_SCORE = 5000; 
         
         // --- WHITE NOISE VARIABLES ---
-        let audioContext; // Will be initialized after user interaction
-        let whiteNoiseNode = null; // To hold the white noise source
+        let audioContext;
+        let whiteNoiseNode = null;
+        let lfoNode = null; // To hold the Low Frequency Oscillator
 
         // --- COMMUNICATION WITH THUNKABLE ---
-        // Listens for messages from the Thunkable app to change the raw sound threshold
         window.addEventListener('message', function(event) {
             const message = event.data;
             if (typeof message === 'string' && message.startsWith('SET_THRESHOLD:')) {
@@ -112,34 +121,27 @@
 
         // --- CORE AUDIO PROCESSING LOGIC ---
         async function startMonitoring() {
-            // Hide the start button and show the main monitoring UI
             document.getElementById('startScreen').style.display = 'none';
             document.getElementById('mainContent').style.display = 'block';
 
             try {
-                // Initialize the main AudioContext for all audio operations
                 audioContext = new AudioContext();
-
-                // Request access to the user's microphone
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 
-                // Set up the Web Audio API components for analysis
                 const mediaStreamSource = audioContext.createMediaStreamSource(stream);
                 const analyser = audioContext.createAnalyser();
-                analyser.fftSize = 256; // Determines the detail of the sound analysis
+                analyser.fftSize = 256;
                 mediaStreamSource.connect(analyser);
 
                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
                 // --- MAIN LOOP ---
-                // This function runs continuously to check the sound level
                 function checkSoundLevel() {
                     analyser.getByteFrequencyData(dataArray);
                     
                     let sum = 0;
                     for (const amplitude of dataArray) { sum += amplitude * amplitude; }
                     const rawVolume = Math.sqrt(sum / dataArray.length);
-                    
                     const scaledVolume = Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
                     
                     if (scaledVolume > volumeThreshold) {
@@ -150,22 +152,19 @@
                     }
 
                     const disturbanceLevel = calculateDisturbanceLevel();
-                    
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
-                    // Trigger the "shush" message and white noise if disturbance is high
                     if (disturbanceLevel > 50 && !isShushing) {
                         isShushing = true; 
                         const shushElement = document.getElementById('shushMessage');
                         shushElement.style.display = 'block';
 
-                        // --- Play White Noise with proportional volume ---
                         playWhiteNoise(disturbanceLevel);
                         
                         setTimeout(() => {
                             shushElement.style.display = 'none';
                             isShushing = false;
-                        }, 10000); // Shush message disappears after 10s
+                        }, 10000);
                     }
                     
                     requestAnimationFrame(checkSoundLevel);
@@ -180,70 +179,77 @@
 
         // --- WHITE NOISE PLAYER FUNCTION ---
         function playWhiteNoise(triggeredLevel) {
-            if (whiteNoiseNode) {
-                whiteNoiseNode.stop();
-            }
+            if (whiteNoiseNode) whiteNoiseNode.stop();
+            if (lfoNode) lfoNode.stop();
 
+            // Main gain node for overall volume control
             const gainNode = audioContext.createGain();
             gainNode.connect(audioContext.destination);
 
+            // Create and configure the white noise source
             const bufferSize = 2 * audioContext.sampleRate;
             const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
             const output = noiseBuffer.getChannelData(0);
             for (let i = 0; i < bufferSize; i++) {
                 output[i] = Math.random() * 2 - 1;
             }
-
             whiteNoiseNode = audioContext.createBufferSource();
             whiteNoiseNode.buffer = noiseBuffer;
             whiteNoiseNode.loop = true;
             whiteNoiseNode.connect(gainNode);
 
+            // --- LFO (Low Frequency Oscillator) for volume modulation ---
+            // Create an oscillator to control the volume wave
+            lfoNode = audioContext.createOscillator();
+            lfoNode.type = 'sine';
+            // A 5-second period means a frequency of 1/5 = 0.2 Hz
+            lfoNode.frequency.setValueAtTime(0.2, audioContext.currentTime);
+
+            // Create a gain node for the LFO to control the *depth* of the wave
+            const lfoGain = audioContext.createGain();
+            // This value controls how much the volume fluctuates. 0.04 means +/- 4% of the peak volume.
+            lfoGain.gain.setValueAtTime(0.04, audioContext.currentTime);
+
+            // Connect the LFO signal through its gain node to the main gain parameter
+            lfoNode.connect(lfoGain);
+            lfoGain.connect(gainNode.gain);
+
             // --- DYNAMIC VOLUME RAMPING ---
             const now = audioContext.currentTime;
-            
-            // 1. Calculate the peak volume based on the disturbance level (51-100).
-            // This maps the disturbance range to a volume range of 0.1 to 0.5.
             const peakVolume = ((triggeredLevel - 50) / 50) * 0.4 + 0.1;
-
-            // 2. Start at a very low volume (effectively silent).
+            
+            // Start silent
             gainNode.gain.setValueAtTime(0.0001, now);
 
-            // 3. Use setTargetAtTime for a smooth, exponential ramp-up.
-            // It will gradually approach the peakVolume. The third parameter (timeConstant)
-            // controls how quickly it ramps up. A larger value means a slower ramp.
-            gainNode.gain.setTargetAtTime(peakVolume, now, 0.8);
+            // The timeConstant is increased to 1.5 for a slower, more noticeable ramp-up
+            gainNode.gain.setTargetAtTime(peakVolume, now, 1.5);
 
-            // 4. Schedule the fade-out to start after 30 seconds.
-            // The ramp-down is also exponential for a gentle tapering effect.
+            // Schedule the fade-out to start after 30 seconds
             gainNode.gain.setTargetAtTime(0.0001, now + 30, 1.5);
 
-            // Start playing the noise
+            // Start both the noise and the volume wave
             whiteNoiseNode.start(now);
+            lfoNode.start(now);
 
-            // Schedule the node to stop completely after the fade-out is finished
-            whiteNoiseNode.stop(now + 30 + 5); // Allow 5s for the fade out
+            // Schedule them to stop after the fade-out is complete
+            whiteNoiseNode.stop(now + 30 + 5);
+            lfoNode.stop(now + 30 + 5);
         }
 
         // --- DISTURBANCE CALCULATION FUNCTION ---
         function calculateDisturbanceLevel() {
             const now = Date.now();
             const tenSecondsAgo = now - 10000;
-
             breachRecords = breachRecords.filter(record => record.timestamp > tenSecondsAgo);
-
             if (breachRecords.length === 0) { return 0; }
-
             let totalScore = 0;
             for (const record of breachRecords) {
                 const recencyWeight = (record.timestamp - tenSecondsAgo) / 10000;
                 totalScore += record.magnitude * recencyWeight;
             }
-
             const scoreAsPercentage = Math.min(1.0, totalScore / MAX_DISTURBANCE_SCORE);
             const curvedScore = Math.pow(scoreAsPercentage, 2.0);
-            const normalizedLevel = Math.round(curvedScore * 100);
-            return normalizedLevel;
+            return Math.round(curvedScore * 100);
         }
 
         // --- EVENT LISTENER ---
