@@ -74,7 +74,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v1.8)</button>
+        <button id="startButton">Start Monitoring (v1.9)</button>
         <div id="mainContent">
             <div id="visualizerContainer">
                 <div id="soundBar"></div>
@@ -82,15 +82,15 @@
             </div>
             <div class="controls">
                 <div class="control-group">
-                    <label for="triggerSlider">Trigger Level: <span id="triggerValue">50</span></label>
-                    <input type="range" id="triggerSlider" min="10" max="100" value="50">
+                    <label for="triggerSlider">Disturbance Trigger: <span id="triggerValue">50</span></label>
+                    <input type="range" id="triggerSlider" min="10" max="95" value="50">
                 </div>
                 <div class="control-group">
                     <label for="volumeSlider">Max Noise Volume: <span id="volumeValue">50</span>%</label>
                     <input type="range" id="volumeSlider" min="0" max="100" value="50">
                 </div>
                 <div class="control-group">
-                    <label for="sensitivitySlider">Disturbance Sensitivity: <span id="sensitivityValue">50</span></label>
+                    <label for="sensitivitySlider">Sound Sensitivity: <span id="sensitivityValue">50</span></label>
                     <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
                 </div>
             </div>
@@ -108,11 +108,13 @@
         const triggerValueSpan = document.getElementById('triggerValue');
         const volumeValueSpan = document.getElementById('volumeValue');
         const sensitivityValueSpan = document.getElementById('sensitivityValue');
+        const triggerLine = document.getElementById('triggerLine');
 
         // --- CONFIGURATION & STATE VARIABLES ---
-        let volumeThreshold = 50;
+        let disturbanceTriggerLevel = 50;
+        let soundSensitivity = 50; // Raw sound threshold
         let maxNoiseVolume = 0.5; // 0.0 to 1.0
-        let disturbanceSensitivity = 5000; // Mapped from slider
+        let disturbanceSensitivityFactor = 5000;
         let isMonitoring = false;
         let animationFrameId = null;
 
@@ -137,8 +139,9 @@
         });
 
         triggerSlider.addEventListener('input', (e) => {
-            volumeThreshold = parseInt(e.target.value);
-            triggerValueSpan.textContent = volumeThreshold;
+            disturbanceTriggerLevel = parseInt(e.target.value);
+            triggerValueSpan.textContent = disturbanceTriggerLevel;
+            triggerLine.style.bottom = `${disturbanceTriggerLevel}%`;
         });
 
         volumeSlider.addEventListener('input', (e) => {
@@ -147,8 +150,8 @@
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
-            // Map slider (1-100) to a score (10000-1000). Lower score = more sensitive.
-            disturbanceSensitivity = 10100 - (parseInt(e.target.value) * 100);
+            // This slider now controls the raw sound threshold
+            soundSensitivity = parseInt(e.target.value);
             sensitivityValueSpan.textContent = e.target.value;
         });
 
@@ -158,7 +161,7 @@
             isMonitoring = true;
             mainContent.style.display = 'block';
             startButton.textContent = 'Stop Monitoring';
-            startButton.style.backgroundColor = '#C62828'; // Change to red
+            startButton.style.backgroundColor = '#C62828';
 
             try {
                 audioContext = new AudioContext();
@@ -179,22 +182,22 @@
                     const rawVolume = Math.sqrt(sum / dataArray.length);
                     const scaledVolume = Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
                     
-                    if (scaledVolume > volumeThreshold) {
-                        breachRecords.push({ timestamp: Date.now(), magnitude: scaledVolume - volumeThreshold });
+                    if (scaledVolume > soundSensitivity) {
+                        breachRecords.push({ timestamp: Date.now(), magnitude: scaledVolume - soundSensitivity });
                     }
 
                     const disturbanceLevel = calculateDisturbanceLevel();
                     const now = Date.now();
                     disturbanceHistory.push({ timestamp: now, level: disturbanceLevel });
-                    disturbanceHistory = disturbanceHistory.filter(record => record.timestamp > now - 3000); // 3-second average
+                    disturbanceHistory = disturbanceHistory.filter(record => record.timestamp > now - 3000);
                     
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
-                    if (disturbanceLevel > 50) {
+                    if (disturbanceLevel > disturbanceTriggerLevel) {
                         manageWhiteNoise();
                     }
 
-                    if (disturbanceLevel > 50 && !isShushing) {
+                    if (disturbanceLevel > disturbanceTriggerLevel && !isShushing) {
                         isShushing = true; 
                         document.getElementById('shushMessage').style.display = 'block';
                         setTimeout(() => {
@@ -209,13 +212,12 @@
             
             } catch (err) {
                 console.error('Error:', err);
-                stopMonitoring(); // Reset on error
+                stopMonitoring();
             }
         }
 
         function stopMonitoring() {
             if (!isMonitoring) return;
-
             cancelAnimationFrame(animationFrameId);
             stopWhiteNoise();
             
@@ -223,25 +225,23 @@
                 streamSource.getTracks().forEach(track => track.stop());
             }
             if (audioContext && audioContext.state !== 'closed') {
-                audioContext.close();
+                audioContext.close().catch(e => console.error("Error closing AudioContext:", e));
             }
 
-            // Reset state
             isMonitoring = false;
             breachRecords = [];
             disturbanceHistory = [];
             animationFrameId = null;
             streamSource = null;
             mainContent.style.display = 'none';
-            startButton.textContent = 'Start Monitoring (v1.8)';
-            startButton.style.backgroundColor = '#00796B'; // Back to green
+            startButton.textContent = `Start Monitoring (v1.9)`;
+            startButton.style.backgroundColor = '#00796B';
         }
 
         function manageWhiteNoise() {
             const avgDisturbance = calculateAverageDisturbance();
-            const clampedAvg = Math.max(50, avgDisturbance);
-            // Peak volume is now scaled by the volume slider
-            const peakVolume = (((clampedAvg - 50) / 50) * 0.4 + 0.1) * maxNoiseVolume;
+            const clampedAvg = Math.max(disturbanceTriggerLevel, avgDisturbance);
+            const peakVolume = (((clampedAvg - disturbanceTriggerLevel) / (100 - disturbanceTriggerLevel)) * 0.4 + 0.1) * maxNoiseVolume;
 
             if (!whiteNoiseNode) {
                 masterGainNode = audioContext.createGain();
@@ -266,7 +266,7 @@
 
                 const now = audioContext.currentTime;
                 masterGainNode.gain.setValueAtTime(0.0001, now);
-                masterGainNode.gain.setTargetAtTime(peakVolume, now, 4.0); // Slower ramp-up (4.0)
+                masterGainNode.gain.setTargetAtTime(peakVolume, now, 8.0); // Much slower ramp-up (8.0)
 
                 whiteNoiseNode.start(now);
                 lfoNode.start(now);
@@ -281,8 +281,17 @@
             const now = audioContext.currentTime;
             masterGainNode.gain.setTargetAtTime(0.0001, now, 1.5);
             const stopTime = now + 5;
-            if (whiteNoiseNode) whiteNoiseNode.stop(stopTime);
-            if (lfoNode) lfoNode.stop(stopTime);
+
+            if(whiteNoiseNode) {
+                try { whiteNoiseNode.stop(stopTime); } catch(e) {}
+                whiteNoiseNode.disconnect();
+            }
+            if(lfoNode) {
+                try { lfoNode.stop(stopTime); } catch(e) {}
+                lfoNode.disconnect();
+            }
+            
+            masterGainNode.disconnect();
             whiteNoiseNode = null;
             lfoNode = null;
             masterGainNode = null;
@@ -304,14 +313,12 @@
                 const recencyWeight = (record.timestamp - tenSecondsAgo) / 10000;
                 totalScore += record.magnitude * recencyWeight;
             }
-            // Use the dynamic sensitivity value here
-            const scoreAsPercentage = Math.min(1.0, totalScore / disturbanceSensitivity);
+            const scoreAsPercentage = Math.min(1.0, totalScore / 5000); // Using a fixed factor now
             const curvedScore = Math.pow(scoreAsPercentage, 2.0);
             return Math.round(curvedScore * 100);
         }
     </script>
 </body>
 </html>
-
 
 
