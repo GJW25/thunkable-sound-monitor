@@ -70,18 +70,19 @@
             bottom: 50%;
             transition: bottom 0.2s ease;
         }
-        .controls { margin-top: 15px; width: 90%; max-width: 300px; display: none; }
+        .controls { margin-top: 15px; width: 90%; max-width: 300px; }
         .control-group { margin-bottom: 10px; text-align: left; }
         .control-group label { display: block; margin-bottom: 5px; font-size: 0.9em; }
         .control-group input[type="range"] { width: 100%; }
-        #soundLevelDisplay { margin-bottom: 5px; }
+        .status-display { margin-bottom: 5px; }
     </style>
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v2.5)</button>
+        <button id="startButton">Start Monitoring (v2.6)</button>
         <div id="mainContent" style="width: 100%;">
-             <div id="soundLevelDisplay">Detected Sound: <span id="soundLevelValue">0</span></div>
+             <div class="status-display">Detected Sound: <span id="soundLevelValue">0</span></div>
+             <div class="status-display">Replay Volume: <span id="replayVolumeValue">0</span></div>
             <div id="visualizerContainer">
                 <div id="soundBar"></div>
                 <div id="triggerLine"></div>
@@ -92,7 +93,7 @@
                     <input type="range" id="triggerSlider" min="10" max="95" value="50">
                 </div>
                 <div class="control-group">
-                    <label for="volumeSlider">Volume: <span id="volumeValue">50%</span></label>
+                    <label for="volumeSlider">Target Volume: <span id="volumeValue">50%</span></label>
                     <input type="range" id="volumeSlider" min="0" max="100" value="50">
                 </div>
                 <div class="control-group">
@@ -111,6 +112,10 @@
                     <label for="oscillationSlider">Oscillation Period: <span id="oscillationValue">9s</span></label>
                     <input type="range" id="oscillationSlider" min="2" max="20" value="9">
                 </div>
+                <div class="control-group">
+                    <label for="oscillationDepthSlider">Oscillation Depth: <span id="oscillationDepthValue">10%</span></label>
+                    <input type="range" id="oscillationDepthSlider" min="0" max="50" value="10">
+                </div>
             </div>
             <div id="shushMessage">Shusssshhhhh</div>
         </div>
@@ -127,14 +132,17 @@
         const durationSlider = document.getElementById('durationSlider');
         const rampSlider = document.getElementById('rampSlider');
         const oscillationSlider = document.getElementById('oscillationSlider');
+        const oscillationDepthSlider = document.getElementById('oscillationDepthSlider');
         const triggerValueSpan = document.getElementById('triggerValue');
         const volumeValueSpan = document.getElementById('volumeValue');
         const sensitivityValueSpan = document.getElementById('sensitivityValue');
         const durationValueSpan = document.getElementById('durationValue');
         const rampValueSpan = document.getElementById('rampValue');
         const oscillationValueSpan = document.getElementById('oscillationValue');
+        const oscillationDepthValueSpan = document.getElementById('oscillationDepthValue');
         const triggerLine = document.getElementById('triggerLine');
         const soundLevelValue = document.getElementById('soundLevelValue');
+        const replayVolumeValue = document.getElementById('replayVolumeValue');
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
@@ -143,6 +151,7 @@
         let playDurationAfterTrigger = 30;
         let rampPeriod = 4;
         let oscillationPeriod = 9;
+        let oscillationDepth = 0.1; // 10% of target volume
         let isMonitoring = false;
         let animationFrameId = null;
         let stopSoundTimer = null;
@@ -156,7 +165,7 @@
         let lfoNode = null;
         let lfoGain = null;
         let masterGainNode = null;
-        let audioState = 'idle'; // Can be 'idle', 'rampingUp', 'sustaining', 'rampingDown'
+        let audioState = 'idle'; // 'idle', 'rampingUp', 'sustaining', 'rampingDown'
 
         // --- SECTION 4: EVENT LISTENERS ---
         startButton.addEventListener('click', () => {
@@ -177,6 +186,12 @@
             const newVolume = parseInt(e.target.value);
             targetVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
+            if (audioState === 'sustaining') {
+                 masterGainNode.gain.setTargetAtTime(targetVolume, audioContext.currentTime, 0.5);
+            }
+            if (lfoGain) {
+                lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
+            }
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
@@ -186,17 +201,11 @@
         
         durationSlider.addEventListener('input', (e) => {
             const sliderValue = parseInt(e.target.value);
-            const minSec = 5;
-            const maxSec = 1800; // 30 minutes
-            const minLog = Math.log(minSec);
-            const maxLog = Math.log(maxSec);
+            const minSec = 5; const maxSec = 1800;
+            const minLog = Math.log(minSec); const maxLog = Math.log(maxSec);
             const scale = (maxLog - minLog) / 99;
             playDurationAfterTrigger = Math.exp(minLog + scale * (sliderValue - 1));
-            if (playDurationAfterTrigger < 60) {
-                durationValueSpan.textContent = `${Math.round(playDurationAfterTrigger)}s`;
-            } else {
-                durationValueSpan.textContent = `${Math.round(playDurationAfterTrigger / 60)}m`;
-            }
+            durationValueSpan.textContent = playDurationAfterTrigger < 60 ? `${Math.round(playDurationAfterTrigger)}s` : `${Math.round(playDurationAfterTrigger / 60)}m`;
         });
         
         rampSlider.addEventListener('input', (e) => {
@@ -209,6 +218,15 @@
             oscillationValueSpan.textContent = `${oscillationPeriod}s`;
             if (lfoNode) {
                 lfoNode.frequency.setTargetAtTime(1 / oscillationPeriod, audioContext.currentTime, 0.1);
+            }
+        });
+
+        oscillationDepthSlider.addEventListener('input', (e) => {
+            const depthPercentage = parseInt(e.target.value);
+            oscillationDepth = depthPercentage / 100;
+            oscillationDepthValueSpan.textContent = `${depthPercentage}%`;
+            if(lfoGain) {
+                lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
             }
         });
 
@@ -235,10 +253,7 @@
                 function mainLoop() {
                     analyser.getByteFrequencyData(dataArray);
                     
-                    let sum = 0;
-                    for (const amplitude of dataArray) { sum += amplitude * amplitude; }
-                    const rawVolume = Math.sqrt(sum / dataArray.length);
-                    const scaledVolume = Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
+                    const scaledVolume = calculateLogVolume(dataArray);
                     soundLevelValue.textContent = scaledVolume;
                     
                     if (scaledVolume > soundSensitivity) {
@@ -248,20 +263,17 @@
                     const disturbanceLevel = calculateDisturbanceLevel();
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
-                    if (disturbanceLevel > disturbanceTriggerLevel) {
-                        if (stopSoundTimer) {
-                            clearTimeout(stopSoundTimer);
-                            stopSoundTimer = null;
-                        }
-                        triggerSoundPlayback();
+                    if (masterGainNode) {
+                        replayVolumeValue.textContent = Math.round(masterGainNode.gain.value * 100);
+                    } else {
+                        replayVolumeValue.textContent = 0;
+                    }
 
+                    if (disturbanceLevel > disturbanceTriggerLevel) {
+                        if (stopSoundTimer) { clearTimeout(stopSoundTimer); stopSoundTimer = null; }
+                        triggerSoundPlayback();
                         if (!isShushing) {
-                            isShushing = true; 
-                            document.getElementById('shushMessage').style.display = 'block';
-                            setTimeout(() => {
-                                document.getElementById('shushMessage').style.display = 'none';
-                                isShushing = false;
-                            }, 10000);
+                           showShushMessage();
                         }
                     } else {
                         if (audioState !== 'idle' && !stopSoundTimer) {
@@ -283,7 +295,7 @@
             cancelAnimationFrame(animationFrameId);
             if (stopSoundTimer) clearTimeout(stopSoundTimer);
             stopSoundTimer = null;
-            triggerSoundStop(); // Gracefully stop the sound
+            triggerSoundStop();
             
             if (streamSource) {
                 streamSource.getTracks().forEach(track => track.stop());
@@ -293,40 +305,29 @@
             breachRecords = [];
             animationFrameId = null;
             streamSource = null;
-            controls.style.display = 'none';
-            startButton.textContent = `Start Monitoring (v2.5)`;
+            startButton.textContent = `Start Monitoring (v2.6)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
         // --- SECTION 6: NEW AUDIO ENGINE ---
-
-        /**
-         * Determines the appropriate action for sound playback based on the current audio state.
-         * This is called when a disturbance is detected.
-         */
         function triggerSoundPlayback() {
             const now = audioContext.currentTime;
             
-            // If idle, create the audio nodes and start ramping up.
             if (audioState === 'idle') {
                 audioState = 'rampingUp';
                 createAudioNodes();
                 masterGainNode.gain.setValueAtTime(0.0001, now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
-                // After the ramp, transition to sustaining/oscillating.
                 setTimeout(() => {
-                    if (audioState === 'rampingUp') { // Check if we weren't interrupted
+                    if (audioState === 'rampingUp') {
                         audioState = 'sustaining';
-                        lfoGain.connect(masterGainNode.gain); // Start oscillation
+                        lfoGain.connect(masterGainNode.gain);
                     }
                 }, rampPeriod * 1000);
             }
-            // If it was ramping down, it's an interruption. Cancel the ramp down and ramp back up.
             else if (audioState === 'rampingDown') {
                 audioState = 'rampingUp';
                 masterGainNode.gain.cancelScheduledValues(now);
-                const currentVolume = masterGainNode.gain.value;
-                masterGainNode.gain.setValueAtTime(currentVolume, now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
                  setTimeout(() => {
                     if (audioState === 'rampingUp') {
@@ -335,36 +336,21 @@
                     }
                 }, rampPeriod * 1000);
             }
-            // If already ramping up or sustaining, do nothing.
         }
 
-        /**
-         * Initiates the process of stopping the sound playback.
-         */
         function triggerSoundStop() {
             if (audioState === 'idle' || audioState === 'rampingDown') return;
 
             const now = audioContext.currentTime;
             audioState = 'rampingDown';
-
-            // Disconnect the LFO to stop oscillation immediately before ramping down.
-            if (lfoGain) {
-                try { lfoGain.disconnect(masterGainNode.gain); } catch (e) {}
-            }
+            if (lfoGain) { try { lfoGain.disconnect(masterGainNode.gain); } catch (e) {} }
             
-            // Start the ramp down from the current volume to zero.
             masterGainNode.gain.cancelScheduledValues(now);
-            const currentVolume = masterGainNode.gain.value;
-            masterGainNode.gain.setValueAtTime(currentVolume, now);
-            masterGainNode.gain.linearRampToValueAtTime(0.0001, now + rampPeriod);
+            masterGainNode.gain.setTargetAtTime(0.0001, now, rampPeriod / 4); // Use setTarget for a smoother fadeout
             
-            // After the ramp is finished, clean up everything.
-            setTimeout(cleanupAudioNodes, rampPeriod * 1000);
+            setTimeout(cleanupAudioNodes, (rampPeriod + 1) * 1000);
         }
 
-        /**
-         * Creates all the necessary Web Audio API nodes for generating sound.
-         */
         function createAudioNodes() {
             masterGainNode = audioContext.createGain();
             masterGainNode.connect(audioContext.destination);
@@ -382,36 +368,32 @@
             lfoNode.type = 'sine';
             lfoNode.frequency.setValueAtTime(1 / oscillationPeriod, audioContext.currentTime);
             lfoGain = audioContext.createGain();
-            lfoGain.gain.setValueAtTime(0.04 * targetVolume, audioContext.currentTime); // LFO depth proportional to volume
+            lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, audioContext.currentTime);
             lfoNode.connect(lfoGain);
 
             whiteNoiseNode.start(audioContext.currentTime);
             lfoNode.start(audioContext.currentTime);
         }
 
-        /**
-         * Disconnects and nullifies all audio nodes to free up resources.
-         */
         function cleanupAudioNodes() {
-            // Only cleanup if we are truly stopping, not if we were interrupted.
             if (audioState !== 'rampingDown') return;
-
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
             if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
             if (masterGainNode) { try { masterGainNode.disconnect(); } catch (e) {} }
             
-            whiteNoiseNode = null;
-            lfoNode = null;
-            lfoGain = null;
-            masterGainNode = null;
-            audioState = 'idle'; // Reset state
+            whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
+            audioState = 'idle';
         }
         
-        /**
-         * Calculates the disturbance level based on recent sound breaches.
-         * @returns {number} The disturbance level from 0 to 100.
-         */
+        // --- SECTION 7: HELPER FUNCTIONS ---
+        function calculateLogVolume(dataArray) {
+            let sum = 0;
+            for (const amplitude of dataArray) { sum += amplitude * amplitude; }
+            const rawVolume = Math.sqrt(sum / dataArray.length);
+            return Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
+        }
+
         function calculateDisturbanceLevel() {
             const now = Date.now();
             const tenSecondsAgo = now - 10000;
@@ -426,8 +408,18 @@
             const curvedScore = Math.pow(scoreAsPercentage, 2.0);
             return Math.round(curvedScore * 100);
         }
+
+        function showShushMessage() {
+            isShushing = true; 
+            document.getElementById('shushMessage').style.display = 'block';
+            setTimeout(() => {
+                document.getElementById('shushMessage').style.display = 'none';
+                isShushing = false;
+            }, 10000);
+        }
     </script>
 </body>
 </html>
+
 
 
