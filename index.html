@@ -74,7 +74,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v1.9)</button>
+        <button id="startButton">Start Monitoring (v2.0)</button>
         <div id="mainContent">
             <div id="visualizerContainer">
                 <div id="soundBar"></div>
@@ -86,11 +86,11 @@
                     <input type="range" id="triggerSlider" min="10" max="95" value="50">
                 </div>
                 <div class="control-group">
-                    <label for="volumeSlider">Max Noise Volume: <span id="volumeValue">50</span>%</label>
+                    <label for="volumeSlider">Volume: <span id="volumeValue">50%</span></label>
                     <input type="range" id="volumeSlider" min="0" max="100" value="50">
                 </div>
                 <div class="control-group">
-                    <label for="sensitivitySlider">Sound Sensitivity: <span id="sensitivityValue">50</span></label>
+                    <label for="sensitivitySlider">Disturbance Sensitivity: <span id="sensitivityValue">50</span></label>
                     <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
                 </div>
             </div>
@@ -114,7 +114,6 @@
         let disturbanceTriggerLevel = 50;
         let soundSensitivity = 50; // Raw sound threshold
         let maxNoiseVolume = 0.5; // 0.0 to 1.0
-        let disturbanceSensitivityFactor = 5000;
         let isMonitoring = false;
         let animationFrameId = null;
 
@@ -127,6 +126,7 @@
         let streamSource;
         let whiteNoiseNode = null;
         let lfoNode = null;
+        let lfoGain = null; // Separate LFO gain for real-time updates
         let masterGainNode = null;
 
         // --- EVENT LISTENERS ---
@@ -145,13 +145,19 @@
         });
 
         volumeSlider.addEventListener('input', (e) => {
-            maxNoiseVolume = parseInt(e.target.value) / 100;
-            volumeValueSpan.textContent = `${e.target.value}%`;
+            const newVolume = parseInt(e.target.value);
+            maxNoiseVolume = newVolume / 100;
+            volumeValueSpan.textContent = `${newVolume}%`;
+            
+            // If the LFO is active, update its gain in real-time
+            if (lfoGain) {
+                lfoGain.gain.setTargetAtTime(0.04 * maxNoiseVolume, audioContext.currentTime, 0.1);
+            }
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
-            // This slider now controls the raw sound threshold
-            soundSensitivity = parseInt(e.target.value);
+            // Reverse the slider: 1 is most sensitive (low threshold), 100 is least sensitive (high threshold)
+            soundSensitivity = 101 - parseInt(e.target.value);
             sensitivityValueSpan.textContent = e.target.value;
         });
 
@@ -234,7 +240,7 @@
             animationFrameId = null;
             streamSource = null;
             mainContent.style.display = 'none';
-            startButton.textContent = `Start Monitoring (v1.9)`;
+            startButton.textContent = `Start Monitoring (v2.0)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -259,14 +265,14 @@
                 lfoNode = audioContext.createOscillator();
                 lfoNode.type = 'sine';
                 lfoNode.frequency.setValueAtTime(0.2, audioContext.currentTime);
-                const lfoGain = audioContext.createGain();
+                lfoGain = audioContext.createGain(); // Assign to the global variable
                 lfoGain.gain.setValueAtTime(0.04 * maxNoiseVolume, audioContext.currentTime);
                 lfoNode.connect(lfoGain);
                 lfoGain.connect(masterGainNode.gain);
 
                 const now = audioContext.currentTime;
                 masterGainNode.gain.setValueAtTime(0.0001, now);
-                masterGainNode.gain.setTargetAtTime(peakVolume, now, 8.0); // Much slower ramp-up (8.0)
+                masterGainNode.gain.setTargetAtTime(peakVolume, now, 12.0); // Even slower ramp-up (12.0)
 
                 whiteNoiseNode.start(now);
                 lfoNode.start(now);
@@ -290,10 +296,14 @@
                 try { lfoNode.stop(stopTime); } catch(e) {}
                 lfoNode.disconnect();
             }
+            if(lfoGain) {
+                lfoGain.disconnect();
+            }
             
             masterGainNode.disconnect();
             whiteNoiseNode = null;
             lfoNode = null;
+            lfoGain = null;
             masterGainNode = null;
         }
 
