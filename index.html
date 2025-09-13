@@ -79,7 +79,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v2.6)</button>
+        <button id="startButton">Start Monitoring (v2.7)</button>
         <div id="mainContent" style="width: 100%;">
              <div class="status-display">Detected Sound: <span id="soundLevelValue">0</span></div>
              <div class="status-display">Replay Volume: <span id="replayVolumeValue">0</span></div>
@@ -155,6 +155,7 @@
         let isMonitoring = false;
         let animationFrameId = null;
         let stopSoundTimer = null;
+        let cooldownStartTime = null; // Tracks when the cooldown for stopping sound begins
         let breachRecords = [];
         let isShushing = false;
         
@@ -186,9 +187,11 @@
             const newVolume = parseInt(e.target.value);
             targetVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
-            if (audioState === 'sustaining') {
+            // If sound is playing, smoothly transition to the new target volume.
+            if (audioState === 'sustaining' || audioState === 'rampingUp') {
                  masterGainNode.gain.setTargetAtTime(targetVolume, audioContext.currentTime, 0.5);
             }
+            // Also update the oscillation depth in real-time.
             if (lfoGain) {
                 lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
             }
@@ -206,6 +209,19 @@
             const scale = (maxLog - minLog) / 99;
             playDurationAfterTrigger = Math.exp(minLog + scale * (sliderValue - 1));
             durationValueSpan.textContent = playDurationAfterTrigger < 60 ? `${Math.round(playDurationAfterTrigger)}s` : `${Math.round(playDurationAfterTrigger / 60)}m`;
+
+            // If a cooldown timer is already running, clear it and set a new one with the updated duration.
+            if (stopSoundTimer && cooldownStartTime) {
+                clearTimeout(stopSoundTimer);
+                const elapsedTime = (Date.now() - cooldownStartTime) / 1000;
+                const newRemainingTime = playDurationAfterTrigger - elapsedTime;
+
+                if (newRemainingTime > 0) {
+                    stopSoundTimer = setTimeout(triggerSoundStop, newRemainingTime * 1000);
+                } else {
+                    triggerSoundStop(); // The new duration is shorter than the time already passed.
+                }
+            }
         });
         
         rampSlider.addEventListener('input', (e) => {
@@ -225,6 +241,7 @@
             const depthPercentage = parseInt(e.target.value);
             oscillationDepth = depthPercentage / 100;
             oscillationDepthValueSpan.textContent = `${depthPercentage}%`;
+            // Update the LFO gain in real-time to change the wave's intensity.
             if(lfoGain) {
                 lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
             }
@@ -235,7 +252,6 @@
         async function startMonitoring() {
             if (isMonitoring) return;
             isMonitoring = true;
-            controls.style.display = 'block';
             startButton.textContent = 'Stop Monitoring';
             startButton.style.backgroundColor = '#C62828';
 
@@ -263,6 +279,7 @@
                     const disturbanceLevel = calculateDisturbanceLevel();
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
+                    // Update the replay volume display continuously.
                     if (masterGainNode) {
                         replayVolumeValue.textContent = Math.round(masterGainNode.gain.value * 100);
                     } else {
@@ -270,13 +287,15 @@
                     }
 
                     if (disturbanceLevel > disturbanceTriggerLevel) {
-                        if (stopSoundTimer) { clearTimeout(stopSoundTimer); stopSoundTimer = null; }
+                        if (stopSoundTimer) { clearTimeout(stopSoundTimer); stopSoundTimer = null; cooldownStartTime = null; }
                         triggerSoundPlayback();
                         if (!isShushing) {
                            showShushMessage();
                         }
                     } else {
+                        // If disturbance is low and no cooldown timer is set, start one.
                         if (audioState !== 'idle' && !stopSoundTimer) {
+                            cooldownStartTime = Date.now();
                             stopSoundTimer = setTimeout(triggerSoundStop, playDurationAfterTrigger * 1000);
                         }
                     }
@@ -295,6 +314,7 @@
             cancelAnimationFrame(animationFrameId);
             if (stopSoundTimer) clearTimeout(stopSoundTimer);
             stopSoundTimer = null;
+            cooldownStartTime = null;
             triggerSoundStop();
             
             if (streamSource) {
@@ -305,7 +325,7 @@
             breachRecords = [];
             animationFrameId = null;
             streamSource = null;
-            startButton.textContent = `Start Monitoring (v2.6)`;
+            startButton.textContent = `Start Monitoring (v2.7)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -316,17 +336,20 @@
             if (audioState === 'idle') {
                 audioState = 'rampingUp';
                 createAudioNodes();
+                // Start from silence and ramp up smoothly.
                 masterGainNode.gain.setValueAtTime(0.0001, now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
+                // After the ramp is complete, transition to the sustaining state and enable oscillation.
                 setTimeout(() => {
                     if (audioState === 'rampingUp') {
                         audioState = 'sustaining';
-                        lfoGain.connect(masterGainNode.gain);
+                        lfoGain.connect(masterGainNode.gain); // This enables the volume oscillation.
                     }
                 }, rampPeriod * 1000);
             }
             else if (audioState === 'rampingDown') {
                 audioState = 'rampingUp';
+                // If we were ramping down, cancel it and ramp back up from the current volume.
                 masterGainNode.gain.cancelScheduledValues(now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
                  setTimeout(() => {
@@ -343,11 +366,17 @@
 
             const now = audioContext.currentTime;
             audioState = 'rampingDown';
+            
+            // Disconnect the LFO first to stop the oscillation before fading out.
             if (lfoGain) { try { lfoGain.disconnect(masterGainNode.gain); } catch (e) {} }
             
+            // Cancel any pending changes, start from the current volume, and ramp linearly to zero.
+            // This prevents the final "burst" of sound.
             masterGainNode.gain.cancelScheduledValues(now);
-            masterGainNode.gain.setTargetAtTime(0.0001, now, rampPeriod / 4); // Use setTarget for a smoother fadeout
+            masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
+            masterGainNode.gain.linearRampToValueAtTime(0.0001, now + rampPeriod);
             
+            // Schedule the cleanup to happen after the ramp is fully complete.
             setTimeout(cleanupAudioNodes, (rampPeriod + 1) * 1000);
         }
 
@@ -368,15 +397,18 @@
             lfoNode.type = 'sine';
             lfoNode.frequency.setValueAtTime(1 / oscillationPeriod, audioContext.currentTime);
             lfoGain = audioContext.createGain();
+            // The LFO's gain determines the depth of the volume wave.
             lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, audioContext.currentTime);
             lfoNode.connect(lfoGain);
 
+            // Start the sound sources. The LFO is not connected to the main gain yet.
             whiteNoiseNode.start(audioContext.currentTime);
             lfoNode.start(audioContext.currentTime);
         }
 
         function cleanupAudioNodes() {
             if (audioState !== 'rampingDown') return;
+
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
             if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
@@ -420,6 +452,7 @@
     </script>
 </body>
 </html>
+
 
 
 
