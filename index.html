@@ -86,7 +86,7 @@
         .control-group input[type="range"] { width: 100%; }
         .status-display { margin-bottom: 5px; }
         
-        /* New Screensaver Styles */
+        /* Screensaver Styles */
         #screensaver {
             position: fixed;
             top: 0;
@@ -96,10 +96,16 @@
             background-color: #000;
             z-index: 100;
             display: none; /* Hidden by default */
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             opacity: 0;
             transition: opacity 0.5s ease;
+        }
+        #screensaverText {
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 1.2em;
         }
         #returnButton {
             padding: 15px 30px;
@@ -110,11 +116,37 @@
             background-color: #333;
             color: #ccc;
         }
+
+        /* Advanced Settings & Switch Styles */
+        .advanced-controls summary {
+            cursor: pointer;
+            padding: 8px;
+            background-color: #333;
+            border-radius: 4px;
+            margin: 15px 0 10px 0;
+            outline: none;
+        }
+        .advanced-controls[open] summary {
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+        .advanced-controls .details-content {
+            padding: 10px;
+            background-color: #2a2a2a;
+            border-bottom-left-radius: 4px;
+            border-bottom-right-radius: 4px;
+        }
+        .switch-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
     </style>
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.4)</button>
+        <button id="startButton">Start Monitoring (v3.5)</button>
         <div id="mainContent" style="width: 100%;">
             <div id="displayArea">
                 <div id="visualizerContainer">
@@ -144,24 +176,38 @@
                     <label for="durationSlider">Decay Duration: <span id="durationValue">30s</span></label>
                     <input type="range" id="durationSlider" min="1" max="100" value="25">
                 </div>
-                 <div class="control-group">
-                    <label for="rampSlider">Ramp Period: <span id="rampValue">4s</span></label>
-                    <input type="range" id="rampSlider" min="1" max="10" value="4">
-                </div>
-                 <div class="control-group">
-                    <label for="oscillationSlider">Oscillation Period: <span id="oscillationValue">9s</span></label>
-                    <input type="range" id="oscillationSlider" min="2" max="20" value="9">
-                </div>
-                <div class="control-group">
-                    <label for="oscillationDepthSlider">Oscillation Depth: <span id="oscillationDepthValue">10%</span></label>
-                    <input type="range" id="oscillationDepthSlider" min="0" max="100" value="10">
+
+                <details class="advanced-controls">
+                    <summary>Advanced Settings</summary>
+                    <div class="details-content">
+                        <div class="control-group">
+                            <label for="rampSlider">Ramp Period: <span id="rampValue">4s</span></label>
+                            <input type="range" id="rampSlider" min="1" max="10" value="4">
+                        </div>
+                        <div class="control-group">
+                            <label for="oscillationSlider">Oscillation Period: <span id="oscillationValue">9s</span></label>
+                            <input type="range" id="oscillationSlider" min="2" max="20" value="9">
+                        </div>
+                        <div class="control-group">
+                            <label for="oscillationDepthSlider">Oscillation Depth: <span id="oscillationDepthValue">50%</span></label>
+                            <input type="range" id="oscillationDepthSlider" min="0" max="100" value="50">
+                        </div>
+                    </div>
+                </details>
+                
+                <div class="control-group switch-group">
+                    <label for="screensaverToggle">Enable Screensaver</label>
+                    <input type="checkbox" id="screensaverToggle" checked>
                 </div>
             </div>
             <div id="shushMessage">Shusssshhhhh</div>
         </div>
     </div>
     <div id="screensaver">
-        <button id="returnButton">Return</button>
+        <div>
+            <p id="screensaverText">Monitoring</p>
+            <button id="returnButton">Return to Controls</button>
+        </div>
     </div>
     
     <script>
@@ -174,6 +220,7 @@
         const rampSlider = document.getElementById('rampSlider');
         const oscillationSlider = document.getElementById('oscillationSlider');
         const oscillationDepthSlider = document.getElementById('oscillationDepthSlider');
+        const screensaverToggle = document.getElementById('screensaverToggle');
         const triggerValueSpan = document.getElementById('triggerValue');
         const volumeValueSpan = document.getElementById('volumeValue');
         const sensitivityValueSpan = document.getElementById('sensitivityValue');
@@ -195,8 +242,9 @@
         let decayDuration = 30;
         let rampPeriod = 4;
         let oscillationPeriod = 9;
-        let oscillationDepth = 0.1;
+        let oscillationDepth = 0.5; // Default to 50%
         let isMonitoring = false;
+        let screensaverEnabled = true;
         let animationFrameId = null;
         let breachRecords = [];
         let isShushing = false;
@@ -224,8 +272,11 @@
         });
 
         returnButton.addEventListener('click', resetInactivityTimer);
+        screensaverToggle.addEventListener('change', (e) => {
+            screensaverEnabled = e.target.checked;
+            resetInactivityTimer(); // Reset timer to apply new setting immediately
+        });
 
-        // Add inactivity timer reset to all sliders
         [triggerSlider, volumeSlider, sensitivitySlider, durationSlider, rampSlider, oscillationSlider, oscillationDepthSlider].forEach(slider => {
             slider.addEventListener('input', resetInactivityTimer);
         });
@@ -291,6 +342,7 @@
             isMonitoring = true;
             startButton.textContent = 'Stop Monitoring';
             startButton.style.backgroundColor = '#C62828';
+            resetInactivityTimer(); // Start the timer when monitoring begins
 
             try {
                 audioContext = new AudioContext();
@@ -359,7 +411,11 @@
 
             cancelAnimationFrame(animationFrameId);
             clearAllTimeouts();
-            if (inactivityTimer) clearTimeout(inactivityTimer);
+            if (inactivityTimer) {
+                clearTimeout(inactivityTimer);
+                inactivityTimer = null;
+            }
+            hideScreensaver();
             
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
@@ -379,7 +435,7 @@
             streamSource = null;
             decayEndTime = null;
             
-            startButton.textContent = `Start Monitoring (v3.4)`;
+            startButton.textContent = `Start Monitoring (v3.5)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -488,7 +544,9 @@
         function resetInactivityTimer() {
             if (inactivityTimer) clearTimeout(inactivityTimer);
             hideScreensaver();
-            inactivityTimer = setTimeout(showScreensaver, 10000); // 10 seconds
+            if (screensaverEnabled && isMonitoring) {
+                inactivityTimer = setTimeout(showScreensaver, 10000); // 10 seconds
+            }
         }
 
         function showScreensaver() {
