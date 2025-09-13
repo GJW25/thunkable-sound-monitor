@@ -18,9 +18,9 @@
             align-items: center;
             height: 100%;
             width: 100%;
-            overflow: hidden;
+            overflow-y: auto; /* Allow scrolling on small screens */
             margin: 0;
-            padding: 10px;
+            padding: 20px 10px;
         }
         #shushMessage {
             display: none; 
@@ -32,7 +32,6 @@
         }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         #mainContainer { display: flex; flex-direction: column; align-items: center; }
-        #mainContent { display: none; width: 100%; }
         #startButton {
             padding: 15px 30px;
             font-size: 1.2em;
@@ -80,7 +79,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v2.3)</button>
+        <button id="startButton">Start Monitoring (v2.4)</button>
         <div id="mainContent">
              <div id="soundLevelDisplay">Detected Sound: <span id="soundLevelValue">0</span></div>
             <div id="visualizerContainer">
@@ -118,7 +117,8 @@
     </div>
     
     <script>
-        // --- DOM ELEMENTS ---
+        // --- SECTION 1: DOM ELEMENT REFERENCES ---
+        // Get references to all the interactive HTML elements we need to manipulate.
         const startButton = document.getElementById('startButton');
         const mainContent = document.getElementById('mainContent');
         const triggerSlider = document.getElementById('triggerSlider');
@@ -136,30 +136,36 @@
         const triggerLine = document.getElementById('triggerLine');
         const soundLevelValue = document.getElementById('soundLevelValue');
 
-        // --- CONFIGURATION & STATE VARIABLES ---
-        let disturbanceTriggerLevel = 50;
-        let soundSensitivity = 50;
-        let maxNoiseVolume = 0.5;
-        let playDurationAfterTrigger = 30; // in seconds
-        let rampPeriod = 4; // in seconds
-        let oscillationPeriod = 9; // in seconds
-        let isMonitoring = false;
-        let animationFrameId = null;
-        let stopSoundTimer = null;
+        // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
+        // These variables hold the current settings and state of the application.
+        let disturbanceTriggerLevel = 50; // Level at which white noise plays.
+        let soundSensitivity = 50;        // How sensitive the mic is to sound.
+        let maxNoiseVolume = 0.5;         // Master volume for the white noise (0.0 to 1.0).
+        let playDurationAfterTrigger = 30;// How long noise plays after disturbance stops (in seconds).
+        let rampPeriod = 4;               // Fade-in/out time for the noise (in seconds).
+        let oscillationPeriod = 9;        // Time for one volume oscillation cycle (in seconds).
+        let isMonitoring = false;         // Is the microphone currently active?
+        let animationFrameId = null;      // ID for the main animation loop, used to stop it.
+        let stopSoundTimer = null;        // Timer for stopping the sound after duration ends.
 
-        let breachRecords = [];
-        let disturbanceHistory = [];
-        let isShushing = false;
+        // Data storage for calculations.
+        let breachRecords = [];           // Stores recent sound level breaches.
+        let disturbanceHistory = [];      // Stores recent disturbance level calculations.
+        let isShushing = false;           // Flag to prevent "Shush" message from re-triggering.
         
-        // --- AUDIO VARIABLES ---
-        let audioContext;
-        let streamSource;
-        let whiteNoiseNode = null;
-        let lfoNode = null;
-        let lfoGain = null;
-        let masterGainNode = null;
+        // --- SECTION 3: AUDIO API VARIABLES ---
+        // Variables to hold the components of the Web Audio API engine.
+        let audioContext;                 // The main audio processing environment.
+        let streamSource;                 // The raw microphone audio stream.
+        let whiteNoiseNode = null;        // The node that generates the white noise sound.
+        let lfoNode = null;               // The oscillator that creates the volume wave.
+        let lfoGain = null;               // Controls the intensity (amplitude) of the LFO wave.
+        let masterGainNode = null;        // The main volume control for the white noise.
 
-        // --- EVENT LISTENERS ---
+        // --- SECTION 4: EVENT LISTENERS ---
+        // This section connects user actions (like clicking or sliding) to functions.
+
+        // Main Start/Stop button.
         startButton.addEventListener('click', () => {
             if (isMonitoring) {
                 stopMonitoring();
@@ -168,35 +174,42 @@
             }
         });
 
+        // Disturbance Trigger slider.
         triggerSlider.addEventListener('input', (e) => {
             disturbanceTriggerLevel = parseInt(e.target.value);
             triggerValueSpan.textContent = disturbanceTriggerLevel;
             triggerLine.style.bottom = `${disturbanceTriggerLevel}%`;
         });
 
+        // Volume slider.
         volumeSlider.addEventListener('input', (e) => {
             const newVolume = parseInt(e.target.value);
             maxNoiseVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
+            // If the LFO is active, update its intensity to match the new volume.
             if (lfoGain) {
                 lfoGain.gain.setTargetAtTime(0.04 * maxNoiseVolume, audioContext.currentTime, 0.1);
             }
         });
 
+        // Disturbance Sensitivity slider.
         sensitivitySlider.addEventListener('input', (e) => {
+            // Reverse the slider: Higher value = less sensitive.
             soundSensitivity = 101 - parseInt(e.target.value);
             sensitivityValueSpan.textContent = e.target.value;
         });
         
+        // Play Duration slider.
         durationSlider.addEventListener('input', (e) => {
             const sliderValue = parseInt(e.target.value);
+            // A logarithmic scale makes it easier to select shorter durations.
             const minSec = 5;
             const maxSec = 1800; // 30 minutes
             const minLog = Math.log(minSec);
             const maxLog = Math.log(maxSec);
             const scale = (maxLog - minLog) / 99;
             playDurationAfterTrigger = Math.exp(minLog + scale * (sliderValue - 1));
-
+            // Display the value in a user-friendly format (seconds or minutes).
             if (playDurationAfterTrigger < 60) {
                 durationValueSpan.textContent = `${Math.round(playDurationAfterTrigger)}s`;
             } else {
@@ -204,66 +217,80 @@
             }
         });
         
+        // Ramp Period slider.
         rampSlider.addEventListener('input', (e) => {
             rampPeriod = parseInt(e.target.value);
             rampValueSpan.textContent = `${rampPeriod}s`;
         });
 
+        // Oscillation Period slider.
         oscillationSlider.addEventListener('input', (e) => {
             oscillationPeriod = parseInt(e.target.value);
             oscillationValueSpan.textContent = `${oscillationPeriod}s`;
+            // If the LFO is active, update its frequency immediately.
             if (lfoNode) {
                 lfoNode.frequency.setValueAtTime(1 / oscillationPeriod, audioContext.currentTime);
             }
         });
 
 
-        // --- CORE LOGIC ---
+        // --- SECTION 5: CORE LOGIC ---
+
+        /**
+         * Initializes the AudioContext, gets microphone permission, and starts the main loop.
+         */
         async function startMonitoring() {
             if (isMonitoring) return;
             isMonitoring = true;
-            mainContent.style.display = 'block';
             startButton.textContent = 'Stop Monitoring';
             startButton.style.backgroundColor = '#C62828';
 
             try {
+                // Create a new audio context and request the microphone stream.
                 audioContext = new AudioContext();
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 streamSource = stream;
                 
+                // Set up the analyser node to measure sound levels.
                 const mediaStreamSource = audioContext.createMediaStreamSource(stream);
                 const analyser = audioContext.createAnalyser();
                 analyser.fftSize = 256;
                 mediaStreamSource.connect(analyser);
                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
+                /**
+                 * The main animation loop that runs every frame to process audio.
+                 */
                 function mainLoop() {
+                    // Get current sound data.
                     analyser.getByteFrequencyData(dataArray);
                     
+                    // Calculate a logarithmic volume level from the raw data.
                     let sum = 0;
                     for (const amplitude of dataArray) { sum += amplitude * amplitude; }
                     const rawVolume = Math.sqrt(sum / dataArray.length);
                     const scaledVolume = Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
                     soundLevelValue.textContent = scaledVolume;
                     
+                    // If the detected sound is over the sensitivity threshold, record it.
                     if (scaledVolume > soundSensitivity) {
                         breachRecords.push({ timestamp: Date.now(), magnitude: scaledVolume - soundSensitivity });
                     }
 
+                    // Calculate the current disturbance level based on recent breaches.
                     const disturbanceLevel = calculateDisturbanceLevel();
-                    const now = Date.now();
-                    disturbanceHistory.push({ timestamp: now, level: disturbanceLevel });
-                    disturbanceHistory = disturbanceHistory.filter(record => record.timestamp > now - 3000);
-                    
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
+                    // Check if the disturbance has passed the trigger level.
                     if (disturbanceLevel > disturbanceTriggerLevel) {
+                        // If a stop timer is running, cancel it because there's new noise.
                         if (stopSoundTimer) {
                             clearTimeout(stopSoundTimer);
                             stopSoundTimer = null;
                         }
-                        manageWhiteNoise();
+                        manageWhiteNoise(); // Start or adjust the white noise.
 
+                        // Show the "Shush" message if it's not already visible.
                         if (!isShushing) {
                             isShushing = true; 
                             document.getElementById('shushMessage').style.display = 'block';
@@ -273,53 +300,70 @@
                             }, 10000);
                         }
                     } else {
+                        // If disturbance is below the trigger and sound is playing, start the countdown to stop it.
                         if (whiteNoiseNode && !stopSoundTimer) {
                             stopSoundTimer = setTimeout(stopWhiteNoise, playDurationAfterTrigger * 1000);
                         }
                     }
                     
+                    // Continue the loop.
                     animationFrameId = requestAnimationFrame(mainLoop);
                 }
-                mainLoop();
+                mainLoop(); // Start the loop.
             
             } catch (err) {
                 console.error('Error:', err);
-                stopMonitoring();
+                stopMonitoring(); // Reset if there's an error.
             }
         }
 
+        /**
+         * Stops the main loop, releases the microphone, and resets the application state.
+         */
         function stopMonitoring() {
             if (!isMonitoring) return;
+
+            // Stop the animation loop.
             cancelAnimationFrame(animationFrameId);
+            // Clear any pending stop timers.
             if (stopSoundTimer) clearTimeout(stopSoundTimer);
             stopSoundTimer = null;
+            // Stop any currently playing white noise.
             stopWhiteNoise();
             
+            // Release the microphone hardware.
             if (streamSource) {
                 streamSource.getTracks().forEach(track => track.stop());
             }
+            // Close the audio context to save resources.
             if (audioContext && audioContext.state !== 'closed') {
                 audioContext.close().catch(e => console.error("Error closing AudioContext:", e));
             }
 
+            // Reset all state variables and UI elements to their initial state.
             isMonitoring = false;
             breachRecords = [];
             disturbanceHistory = [];
             animationFrameId = null;
             streamSource = null;
-            mainContent.style.display = 'none';
-            startButton.textContent = `Start Monitoring (v2.3)`;
+            startButton.textContent = `Start Monitoring (v2.4)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
+        /**
+         * Creates and starts the white noise, or adjusts its volume if already playing.
+         */
         function manageWhiteNoise() {
-            // *** CHANGED: peakVolume is now ONLY controlled by the volume slider ***
+            // The target volume is now controlled ONLY by the volume slider.
             const peakVolume = maxNoiseVolume;
 
+            // If the white noise isn't playing yet, create all the necessary audio nodes.
             if (!whiteNoiseNode) {
+                // 1. Create the main volume control (GainNode).
                 masterGainNode = audioContext.createGain();
                 masterGainNode.connect(audioContext.destination);
 
+                // 2. Generate the white noise buffer.
                 const bufferSize = 2 * audioContext.sampleRate;
                 const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
                 const output = noiseBuffer.getChannelData(0);
@@ -329,38 +373,50 @@
                 whiteNoiseNode.loop = true;
                 whiteNoiseNode.connect(masterGainNode);
 
+                // 3. Create the LFO (oscillator) for volume modulation.
                 lfoNode = audioContext.createOscillator();
                 lfoNode.type = 'sine';
                 lfoNode.frequency.setValueAtTime(1 / oscillationPeriod, audioContext.currentTime);
+                // The LFO's own gain controls the *depth* of the volume wave.
                 lfoGain = audioContext.createGain();
                 lfoGain.gain.setValueAtTime(0.04 * maxNoiseVolume, audioContext.currentTime);
+                // Connect the LFO signal to its gain control.
                 lfoNode.connect(lfoGain);
+                // **FIX:** Connect the LFO's gain control to the *gain parameter* of the master volume node.
+                // This makes the LFO modulate the main volume.
                 lfoGain.connect(masterGainNode.gain);
 
+                // 4. Start the sound with a smooth ramp-up.
                 const now = audioContext.currentTime;
-                masterGainNode.gain.setValueAtTime(0.0001, now);
-                masterGainNode.gain.linearRampToValueAtTime(peakVolume, now + rampPeriod);
+                masterGainNode.gain.setValueAtTime(0.0001, now); // Start from near silence.
+                masterGainNode.gain.linearRampToValueAtTime(peakVolume, now + rampPeriod); // Ramp to target.
 
                 whiteNoiseNode.start(now);
                 lfoNode.start(now);
             } else {
-                // If noise is already playing, just adjust to the current volume
-                masterGainNode.gain.setTargetAtTime(peakVolume, audioContext.currentTime, 1.5);
+                // If noise is already playing, just smoothly adjust its volume to the current target.
+                masterGainNode.gain.linearRampToValueAtTime(peakVolume, audioContext.currentTime + 1.5);
             }
         }
 
+        /**
+         * Smoothly ramps down the white noise volume and cleans up the audio nodes.
+         */
         function stopWhiteNoise() {
             if (!masterGainNode) return;
             const now = audioContext.currentTime;
             const stopTime = now + rampPeriod;
             
+            // Cancel any future scheduled changes and start the ramp down from the current volume.
             masterGainNode.gain.cancelScheduledValues(now);
             masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
             masterGainNode.gain.linearRampToValueAtTime(0.0001, stopTime);
 
+            // Tell the nodes to stop playing after the ramp is complete.
             if(whiteNoiseNode) { try { whiteNoiseNode.stop(stopTime); } catch(e) {} }
             if(lfoNode) { try { lfoNode.stop(stopTime); } catch(e) {} }
             
+            // Clean up the nodes from memory after they've stopped.
             setTimeout(() => {
                 if(whiteNoiseNode) whiteNoiseNode.disconnect();
                 if(lfoNode) lfoNode.disconnect();
@@ -373,22 +429,24 @@
             }, rampPeriod * 1000);
         }
 
-        function calculateAverageDisturbance() {
-            if (disturbanceHistory.length === 0) return 0;
-            const sum = disturbanceHistory.reduce((acc, record) => acc + record.level, 0);
-            return sum / disturbanceHistory.length;
-        }
-
+        /**
+         * Calculates the disturbance level based on recent sound breaches.
+         * @returns {number} The disturbance level from 0 to 100.
+         */
         function calculateDisturbanceLevel() {
             const now = Date.now();
             const tenSecondsAgo = now - 10000;
+            // Discard any breaches that are too old.
             breachRecords = breachRecords.filter(record => record.timestamp > tenSecondsAgo);
             if (breachRecords.length === 0) { return 0; }
+
+            // Calculate a score based on how loud and how recent the breaches were.
             let totalScore = 0;
             for (const record of breachRecords) {
                 const recencyWeight = (record.timestamp - tenSecondsAgo) / 10000;
                 totalScore += record.magnitude * recencyWeight;
             }
+            // Normalize and apply a curve to the score to make it feel more natural.
             const scoreAsPercentage = Math.min(1.0, totalScore / 5000);
             const curvedScore = Math.pow(scoreAsPercentage, 2.0);
             return Math.round(curvedScore * 100);
@@ -396,5 +454,6 @@
     </script>
 </body>
 </html>
+
 
 
