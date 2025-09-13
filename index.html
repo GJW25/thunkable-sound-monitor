@@ -79,10 +79,11 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.1)</button>
+        <button id="startButton">Start Monitoring (v3.2)</button>
         <div id="mainContent" style="width: 100%;">
              <div class="status-display">Detected Sound: <span id="soundLevelValue">0</span></div>
              <div class="status-display">Replay Volume: <span id="replayVolumeValue">0</span></div>
+             <div class="status-display">Time Remaining: <span id="timeRemainingValue">-</span></div>
             <div id="visualizerContainer">
                 <div id="soundBar"></div>
                 <div id="triggerLine"></div>
@@ -141,6 +142,7 @@
         const triggerLine = document.getElementById('triggerLine');
         const soundLevelValue = document.getElementById('soundLevelValue');
         const replayVolumeValue = document.getElementById('replayVolumeValue');
+        const timeRemainingValue = document.getElementById('timeRemainingValue');
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
@@ -155,6 +157,7 @@
         let breachRecords = [];
         let isShushing = false;
         let allTimeouts = [];
+        let decayEndTime = null;
         
         // --- SECTION 3: AUDIO API & STATE VARIABLES ---
         let audioContext;
@@ -235,7 +238,15 @@
 
             try {
                 audioContext = new AudioContext();
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                // Request mic with echo cancellation to prevent feedback loop
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { 
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }, 
+                    video: false 
+                });
                 streamSource = stream;
                 
                 const mediaStreamSource = audioContext.createMediaStreamSource(stream);
@@ -262,6 +273,14 @@
                     } else {
                         replayVolumeValue.textContent = 0;
                     }
+                    
+                    // Update countdown timer
+                    if (audioState === 'decaying' && decayEndTime) {
+                        const remaining = Math.max(0, (decayEndTime - Date.now()) / 1000);
+                        timeRemainingValue.textContent = `${remaining.toFixed(1)}s`;
+                    } else {
+                        timeRemainingValue.textContent = '-';
+                    }
 
                     if (disturbanceLevel > disturbanceTriggerLevel) {
                         triggerSoundPlayback();
@@ -282,12 +301,10 @@
         function stopMonitoring() {
             if (!isMonitoring) return;
 
-            // Stop the main animation loop
             cancelAnimationFrame(animationFrameId);
             clearAllTimeouts();
             
-            // --- NEW: IMMEDIATE SOUND STOP ---
-            // This logic bypasses the state machine to shut down audio instantly.
+            // Immediate sound stop logic
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
             if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
@@ -295,20 +312,18 @@
             
             whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
             audioState = 'idle';
-            // --- END IMMEDIATE SOUND STOP ---
             
             if (streamSource) {
                 streamSource.getTracks().forEach(track => track.stop());
             }
 
-            // Reset all state variables
             isMonitoring = false;
             breachRecords = [];
             animationFrameId = null;
             streamSource = null;
+            decayEndTime = null;
             
-            // Reset UI
-            startButton.textContent = `Start Monitoring (v3.1)`;
+            startButton.textContent = `Start Monitoring (v3.2)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -317,7 +332,6 @@
             const now = audioContext.currentTime;
             
             if (audioState === 'idle') {
-                // --- Initial Trigger from Silence ---
                 audioState = 'rampingUp';
                 createAudioNodes();
                 masterGainNode.gain.setValueAtTime(0.0001, now);
@@ -335,7 +349,6 @@
                 }, rampPeriod * 1000);
             }
             else if (audioState === 'decaying') {
-                // --- Re-triggering during the decay phase ---
                 audioState = 'holdingAfterInterrupt';
                 clearAllTimeouts();
 
@@ -366,6 +379,7 @@
         
         function startDecay() {
             audioState = 'decaying';
+            decayEndTime = Date.now() + decayDuration * 1000;
             const now = audioContext.currentTime;
 
             masterGainNode.gain.setValueAtTime(targetVolume, now);
@@ -403,6 +417,7 @@
 
         function cleanupAudioNodes() {
             if (!['decaying', 'idle'].includes(audioState) && audioState !== 'idle') return;
+            decayEndTime = null;
 
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
