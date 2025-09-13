@@ -20,7 +20,7 @@
             font-size: 1.5em;
             margin: 10px 0;
         }
-        #annoyanceLevelDisplay {
+        #disturbanceLevelDisplay {
             font-weight: 600;
             color: #FFC107;
         }
@@ -90,7 +90,7 @@
             <div id="soundBar"></div>
             <div id="thresholdLine"></div>
         </div>
-        <h2>Annoyance Level: <span id="annoyanceLevelDisplay">0</span></h2>
+        <h2>Disturbance Level: <span id="disturbanceLevelDisplay">0</span></h2>
         <div id="shushMessage">Shusssshhhhh</div>
     </div>
     
@@ -100,9 +100,9 @@
         let breachRecords = [];   // Stores recent sound breaches { timestamp, magnitude }
         let isShushing = false;   // Flag to prevent the "shush" message from re-triggering while visible
         
-        // This constant helps normalize the annoyance score to a 0-100 scale.
+        // This constant helps normalize the disturbance score to a 0-100 scale.
         // It's an estimated max score based on frequent, loud breaches. May need tuning.
-        const MAX_ANNOYANCE_SCORE = 3000; 
+        const MAX_DISTURBANCE_SCORE = 3000; 
 
         // --- COMMUNICATION WITH THUNKABLE ---
         // Listens for messages from the Thunkable app to change the threshold
@@ -163,12 +163,12 @@
                         });
                     }
 
-                    // Calculate the "Annoyance Level" based on recent breaches
-                    const annoyanceLevel = calculateAnnoyanceLevel();
-                    document.getElementById('annoyanceLevelDisplay').textContent = annoyanceLevel;
+                    // Calculate the "Disturbance Level" based on recent breaches
+                    const disturbanceLevel = calculateDisturbanceLevel();
+                    document.getElementById('disturbanceLevelDisplay').textContent = disturbanceLevel;
 
-                    // Trigger the "shush" message if annoyance is high and it's not already showing
-                    if (annoyanceLevel > 50 && !isShushing) {
+                    // Trigger the "shush" message if disturbance is high and it's not already showing
+                    if (disturbanceLevel > 50 && !isShushing) {
                         isShushing = true; // Set flag to prevent re-triggering
                         const shushElement = document.getElementById('shushMessage');
                         shushElement.style.display = 'block';
@@ -192,8 +192,8 @@
             }
         }
 
-        // --- ANNOYANCE CALCULATION FUNCTION ---
-        function calculateAnnoyanceLevel() {
+        // --- DISTURBANCE CALCULATION FUNCTION ---
+        function calculateDisturbanceLevel() {
             const now = Date.now();
             const tenSecondsAgo = now - 10000;
 
@@ -201,10 +201,10 @@
             breachRecords = breachRecords.filter(record => record.timestamp > tenSecondsAgo);
 
             if (breachRecords.length === 0) {
-                return 0; // If no recent breaches, annoyance is 0
+                return 0; // If no recent breaches, disturbance is 0
             }
 
-            // 2. Calculate a total "annoyance score"
+            // 2. Calculate a total "disturbance score"
             let totalScore = 0;
             for (const record of breachRecords) {
                 // a. Calculate a recency weight (0.0 to 1.0)
@@ -216,8 +216,17 @@
                 totalScore += record.magnitude * recencyWeight;
             }
 
-            // 3. Normalize the raw score to a 0-100 scale and return it
-            const normalizedLevel = Math.min(100, Math.round((totalScore / MAX_ANNOYANCE_SCORE) * 100));
+            // 3. Normalize the raw score to a 0-100 scale using a non-linear (log-like) curve.
+            // First, get the raw score as a percentage of the maximum possible score.
+            const scoreAsPercentage = Math.min(1.0, totalScore / MAX_DISTURBANCE_SCORE);
+
+            // Then, apply a power curve (e.g., raise to the power of 1.5) to make it less sensitive at lower levels.
+            // A raw score of 50% (0.5) becomes 0.5^1.5 = 0.35, resulting in a level of 35 instead of 50.
+            // A raw score of 20% (0.2) becomes 0.2^1.5 = 0.089, resulting in a level of 9 instead of 20.
+            const curvedScore = Math.pow(scoreAsPercentage, 1.5);
+
+            // Finally, convert this curved percentage back to a 0-100 scale.
+            const normalizedLevel = Math.round(curvedScore * 100);
             return normalizedLevel;
         }
 
@@ -227,3 +236,4 @@
     </script>
 </body>
 </html>
+
