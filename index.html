@@ -22,15 +22,6 @@
             margin: 0;
             padding: 20px 10px;
         }
-        #shushMessage {
-            display: none; 
-            font-size: 3em; 
-            font-weight: bold;
-            color: #C62828;
-            margin-top: 10px;
-            animation: fadeIn 0.5s;
-        }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         #mainContainer { display: flex; flex-direction: column; align-items: center; width: 100%;}
         #startButton {
             padding: 15px 30px;
@@ -76,14 +67,22 @@
             left: 0;
             width: 100%;
             height: 3px;
-            background-color: #BDBDBD;
+            background-color: #C62828; /* Changed to red */
             bottom: 50%;
             transition: bottom 0.2s ease;
         }
         .controls { margin-top: 15px; width: 90%; max-width: 300px; }
         .control-group { margin-bottom: 10px; text-align: left; position: relative; }
         .control-group label { display: block; margin-bottom: 5px; font-size: 0.9em; }
-        .control-group input[type="range"] { width: 100%; }
+        .control-group .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .control-group input[type="range"] { 
+            flex-grow: 1;
+            width: 100%; 
+        }
         .status-display { margin-bottom: 5px; }
         
         #screensaver {
@@ -151,8 +150,8 @@
             font-size: 12px;
             line-height: 16px;
             cursor: pointer;
-            margin-left: 8px;
             user-select: none;
+            flex-shrink: 0;
         }
         .tooltip {
             visibility: hidden;
@@ -170,18 +169,27 @@
             opacity: 0;
             transition: opacity 0.3s;
         }
-        .tooltip.show {
+        .control-group:hover .tooltip {
             visibility: visible;
             opacity: 1;
+        }
+        h2 {
+            position: relative;
+            display: inline-block;
         }
 
     </style>
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.6)</button>
+        <button id="startButton">Start Monitoring (v3.7)</button>
         <div id="mainContent" style="width: 100%;">
-            <h2>Noise Disturbance</h2>
+            <h2>
+                Noise Disturbance 
+                <span class="info-icon" data-tooltip-id="tooltip-disturbance">?</span>
+            </h2>
+            <div class="tooltip" id="tooltip-disturbance">This bar shows the current disturbance level, calculated from recent loud sounds. The red line is the trigger level.</div>
+
             <div id="displayArea">
                 <div id="visualizerContainer">
                     <div id="soundBar"></div>
@@ -195,26 +203,34 @@
             <div class="controls">
                 <div class="control-group">
                     <label for="triggerSlider">Disturbance Trigger: <span id="triggerValue">50</span></label>
-                    <input type="range" id="triggerSlider" min="10" max="95" value="50">
-                    <span class="info-icon" data-tooltip-id="tooltip-trigger">?</span>
-                    <div class="tooltip" id="tooltip-trigger">Sets the disturbance level (line on the bar) required to activate sound. A lower value is more sensitive.</div>
+                    <div class="slider-container">
+                        <input type="range" id="triggerSlider" min="10" max="95" value="50">
+                        <span class="info-icon" data-tooltip-id="tooltip-trigger">?</span>
+                    </div>
+                    <div class="tooltip" id="tooltip-trigger">Sets the disturbance level (red line) required to activate sound. A lower value is more sensitive.</div>
                 </div>
                 <div class="control-group">
                     <label for="sensitivitySlider">Sensitivity: <span id="sensitivityValue">50</span></label>
-                    <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
-                     <span class="info-icon" data-tooltip-id="tooltip-sensitivity">?</span>
+                    <div class="slider-container">
+                        <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
+                        <span class="info-icon" data-tooltip-id="tooltip-sensitivity">?</span>
+                    </div>
                     <div class="tooltip" id="tooltip-sensitivity">Adjusts microphone sensitivity. Higher values make it easier for quieter sounds to register as a disturbance.</div>
                 </div>
                 <div class="control-group">
                     <label for="volumeSlider">Target Volume: <span id="volumeValue">50%</span></label>
-                    <input type="range" id="volumeSlider" min="0" max="100" value="50">
-                     <span class="info-icon" data-tooltip-id="tooltip-volume">?</span>
+                    <div class="slider-container">
+                        <input type="range" id="volumeSlider" min="0" max="100" value="50">
+                        <span class="info-icon" data-tooltip-id="tooltip-volume">?</span>
+                    </div>
                     <div class="tooltip" id="tooltip-volume">The maximum volume the white noise will reach after being activated.</div>
                 </div>
                  <div class="control-group">
                     <label for="durationSlider">Playing Time: <span id="durationValue">30s</span></label>
-                    <input type="range" id="durationSlider" min="1" max="100" value="25">
-                     <span class="info-icon" data-tooltip-id="tooltip-duration">?</span>
+                    <div class="slider-container">
+                        <input type="range" id="durationSlider" min="1" max="100" value="25">
+                        <span class="info-icon" data-tooltip-id="tooltip-duration">?</span>
+                    </div>
                     <div class="tooltip" id="tooltip-duration">How long the white noise will gently fade out for after it has been activated and the disturbance ends.</div>
                 </div>
                 
@@ -228,26 +244,31 @@
                     <div class="details-content">
                         <div class="control-group">
                             <label for="rampSlider">Ramp Period: <span id="rampValue">4s</span></label>
-                            <input type="range" id="rampSlider" min="1" max="10" value="4">
-                             <span class="info-icon" data-tooltip-id="tooltip-ramp">?</span>
+                            <div class="slider-container">
+                                <input type="range" id="rampSlider" min="1" max="10" value="4">
+                                <span class="info-icon" data-tooltip-id="tooltip-ramp">?</span>
+                            </div>
                             <div class="tooltip" id="tooltip-ramp">How quickly the sound fades in to the target volume when activated.</div>
                         </div>
                         <div class="control-group">
                             <label for="oscillationSlider">Oscillation Period: <span id="oscillationValue">9s</span></label>
-                            <input type="range" id="oscillationSlider" min="2" max="20" value="9">
-                            <span class="info-icon" data-tooltip-id="tooltip-period">?</span>
+                            <div class="slider-container">
+                                <input type="range" id="oscillationSlider" min="2" max="20" value="9">
+                                <span class="info-icon" data-tooltip-id="tooltip-period">?</span>
+                            </div>
                             <div class="tooltip" id="tooltip-period">The time it takes for the volume to complete one full wave (up and down) around the target volume.</div>
                         </div>
                         <div class="control-group">
                             <label for="oscillationDepthSlider">Oscillation Depth: <span id="oscillationDepthValue">50%</span></label>
-                            <input type="range" id="oscillationDepthSlider" min="0" max="100" value="50">
-                            <span class="info-icon" data-tooltip-id="tooltip-depth">?</span>
+                            <div class="slider-container">
+                                <input type="range" id="oscillationDepthSlider" min="0" max="100" value="50">
+                                <span class="info-icon" data-tooltip-id="tooltip-depth">?</span>
+                            </div>
                             <div class="tooltip" id="tooltip-depth">How much the volume varies during oscillation. 0% is no oscillation, 100% will cause the volume to swing between silent and double the target.</div>
                         </div>
                     </div>
                 </details>
             </div>
-            <div id="shushMessage">Shusssshhhhh</div>
         </div>
     </div>
     <div id="screensaver">
@@ -293,11 +314,10 @@
         let screensaverEnabled = true;
         let animationFrameId = null;
         let breachRecords = [];
-        let isShushing = false;
         let allTimeouts = [];
         let decayEndTime = null;
         let inactivityTimer = null;
-        let isMicActive = false; // New flag to track if mic is on
+        let isMicActive = false;
         
         // --- SECTION 3: AUDIO API & STATE VARIABLES ---
         let audioContext;
@@ -332,9 +352,15 @@
         document.querySelectorAll('.info-icon').forEach(icon => {
             const tooltipId = icon.getAttribute('data-tooltip-id');
             const tooltip = document.getElementById(tooltipId);
+            const controlGroup = icon.closest('.control-group') || icon.closest('h2');
+            
             icon.addEventListener('click', (e) => {
                 e.stopPropagation();
-                tooltip.classList.toggle('show');
+                const isVisible = tooltip.classList.contains('show');
+                document.querySelectorAll('.tooltip.show').forEach(t => t.classList.remove('show'));
+                if (!isVisible) {
+                    tooltip.classList.add('show');
+                }
             });
         });
         document.addEventListener('click', () => {
@@ -366,7 +392,6 @@
 
         sensitivitySlider.addEventListener('input', (e) => {
             const sliderValue = parseInt(e.target.value);
-            // Non-linear mapping to make lower end more sensitive
             soundSensitivity = Math.pow(sliderValue / 100, 2);
             sensitivityValueSpan.textContent = sliderValue;
         });
@@ -425,7 +450,7 @@
 
                 isMicActive = true;
                 mainLoop(); // Start continuous analysis
-                startPlaybackAndMonitoring(); // Transition to active monitoring state
+                startPlaybackAndMonitoring();
 
             } catch (err) {
                 console.error('Error:', err);
@@ -452,7 +477,7 @@
             
             breachRecords = [];
             decayEndTime = null;
-            startButton.textContent = `Start Monitoring (v3.6)`;
+            startButton.textContent = `Start Monitoring (v3.7)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -470,9 +495,6 @@
             if (isMonitoring) {
                  if (disturbanceLevel > disturbanceTriggerLevel) {
                     triggerSoundPlayback();
-                    if (!isShushing) {
-                       showShushMessage();
-                    }
                 }
             }
 
@@ -624,12 +646,10 @@
             let sum = 0;
             for (const amplitude of dataArray) { sum += amplitude * amplitude; }
             const rawVolume = Math.sqrt(sum / dataArray.length);
-            // Increased multiplier for more dynamic range
             return Math.min(100, Math.round(25 * Math.log(rawVolume + 1)));
         }
 
         function calculateDisturbanceLevel(currentVolume) {
-             // Map the sensitivity slider (0-1) to a threshold (100 -> 0)
             const volumeThreshold = (1 - soundSensitivity) * 100;
             if (currentVolume > volumeThreshold) {
                 breachRecords.push({ timestamp: Date.now(), magnitude: currentVolume - volumeThreshold });
@@ -648,19 +668,9 @@
             const curvedScore = Math.pow(scoreAsPercentage, 2.0);
             return Math.round(curvedScore * 100);
         }
-
-        function showShushMessage() {
-            isShushing = true; 
-            document.getElementById('shushMessage').style.display = 'block';
-            setTimeout(() => {
-                document.getElementById('shushMessage').style.display = 'none';
-                isShushing = false;
-            }, 10000);
-        }
     </script>
 </body>
 </html>
-
 
 
 
