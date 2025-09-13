@@ -5,7 +5,7 @@
     <style>
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-            background-color: #1a1a1a; 
+            background-color: #212121; /* Muted dark grey */
             color: #e0e0e0; 
             text-align: center; 
             touch-action: none;
@@ -15,20 +15,11 @@
             height: 90vh;
             overflow: hidden;
         }
-        h2 {
-            font-weight: 300;
-            font-size: 1.5em;
-            margin: 10px 0;
-        }
-        #disturbanceLevelDisplay {
-            font-weight: 600;
-            color: #FFC107;
-        }
         #shushMessage {
             display: none; 
             font-size: 4em; 
             font-weight: bold;
-            color: #F44336; 
+            color: #C62828; /* Muted red */
             margin-top: 20px;
             animation: fadeIn 0.5s;
         }
@@ -46,7 +37,7 @@
             cursor: pointer;
             border-radius: 8px;
             border: none;
-            background-color: #4CAF50;
+            background-color: #00796B; /* Muted teal */
             color: white;
         }
         /* Styles for the new sound visualizer */
@@ -66,16 +57,16 @@
             left: 0;
             width: 100%;
             height: 0%; /* Starts at 0, height is controlled by JS */
-            background: linear-gradient(to top, #4CAF50, #F44336);
-            transition: height 0.05s linear;
+            background: linear-gradient(to top, #4A90E2, #F5A623); /* Muted blue to orange */
+            transition: height 0.1s linear;
         }
-        #thresholdLine {
+        #triggerLine {
             position: absolute;
             left: 0;
             width: 100%;
             height: 3px;
-            background-color: #2196F3;
-            bottom: 50%; /* Default position, controlled by JS */
+            background-color: #BDBDBD; /* Muted light grey */
+            bottom: 50%; /* Fixed position for the 50% disturbance trigger */
             transition: bottom 0.2s ease;
         }
     </style>
@@ -88,32 +79,29 @@
     <div id="mainContent">
         <div id="visualizerContainer">
             <div id="soundBar"></div>
-            <div id="thresholdLine"></div>
+            <div id="triggerLine"></div>
         </div>
-        <h2>Disturbance Level: <span id="disturbanceLevelDisplay">0</span></h2>
         <div id="shushMessage">Shusssshhhhh</div>
     </div>
     
     <script>
         // --- CONFIGURATION & STATE VARIABLES ---
-        let volumeThreshold = 50; // The noise level that is considered a "breach" (0-100)
+        let volumeThreshold = 50; // The raw sound level that is considered a "breach" (0-100)
         let breachRecords = [];   // Stores recent sound breaches { timestamp, magnitude }
         let isShushing = false;   // Flag to prevent the "shush" message from re-triggering while visible
         
         // This constant helps normalize the disturbance score to a 0-100 scale.
-        // It's an estimated max score based on frequent, loud breaches. May need tuning.
-        const MAX_DISTURBANCE_SCORE = 3000; 
+        // Increased to make the algorithm less sensitive.
+        const MAX_DISTURBANCE_SCORE = 5000; 
 
         // --- COMMUNICATION WITH THUNKABLE ---
-        // Listens for messages from the Thunkable app to change the threshold
+        // Listens for messages from the Thunkable app to change the raw sound threshold
         window.addEventListener('message', function(event) {
             const message = event.data;
             if (typeof message === 'string' && message.startsWith('SET_THRESHOLD:')) {
                 const newThreshold = Number(message.split(':')[1]);
                 if (!isNaN(newThreshold)) {
                     volumeThreshold = newThreshold;
-                    // Update the visual position of the threshold line
-                    document.getElementById('thresholdLine').style.bottom = `${volumeThreshold}%`;
                 }
             }
         });
@@ -151,12 +139,8 @@
                     // Convert raw volume to a more natural-feeling logarithmic scale (0-100)
                     const scaledVolume = Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
                     
-                    // Update the height of the visual sound bar
-                    document.getElementById('soundBar').style.height = `${scaledVolume}%`;
-                    
-                    // Check if the current volume exceeds the set threshold
+                    // Check if the current volume exceeds the set threshold for what counts as a "breach"
                     if (scaledVolume > volumeThreshold) {
-                        // If it does, record the breach with its timestamp and how loud it was
                         breachRecords.push({
                             timestamp: Date.now(),
                             magnitude: scaledVolume - volumeThreshold // How much it went over
@@ -165,7 +149,10 @@
 
                     // Calculate the "Disturbance Level" based on recent breaches
                     const disturbanceLevel = calculateDisturbanceLevel();
-                    document.getElementById('disturbanceLevelDisplay').textContent = disturbanceLevel;
+                    
+                    // --- VISUAL UPDATE ---
+                    // The main bar now tracks the calculated disturbance level, not the live sound
+                    document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
                     // Trigger the "shush" message if disturbance is high and it's not already showing
                     if (disturbanceLevel > 50 && !isShushing) {
@@ -207,23 +194,16 @@
             // 2. Calculate a total "disturbance score"
             let totalScore = 0;
             for (const record of breachRecords) {
-                // a. Calculate a recency weight (0.0 to 1.0)
-                // Breaches that just happened have a weight near 1.0.
-                // Breaches from almost 10 seconds ago have a weight near 0.0.
                 const recencyWeight = (record.timestamp - tenSecondsAgo) / 10000;
-                
-                // b. The score for this breach is its magnitude multiplied by its recency
                 totalScore += record.magnitude * recencyWeight;
             }
 
             // 3. Normalize the raw score to a 0-100 scale using a non-linear (log-like) curve.
-            // First, get the raw score as a percentage of the maximum possible score.
             const scoreAsPercentage = Math.min(1.0, totalScore / MAX_DISTURBANCE_SCORE);
 
-            // Then, apply a power curve (e.g., raise to the power of 1.5) to make it less sensitive at lower levels.
-            // A raw score of 50% (0.5) becomes 0.5^1.5 = 0.35, resulting in a level of 35 instead of 50.
-            // A raw score of 20% (0.2) becomes 0.2^1.5 = 0.089, resulting in a level of 9 instead of 20.
-            const curvedScore = Math.pow(scoreAsPercentage, 1.5);
+            // The exponent in this power curve was increased from 1.5 to 2.0 to make the
+            // disturbance level grow more slowly at lower levels, making it less sensitive.
+            const curvedScore = Math.pow(scoreAsPercentage, 2.0);
 
             // Finally, convert this curved percentage back to a 0-100 scale.
             const normalizedLevel = Math.round(curvedScore * 100);
