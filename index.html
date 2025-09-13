@@ -39,7 +39,7 @@
         }
         #visualizerContainer {
             width: 80px;
-            height: 150px; /* Reduced height for more space */
+            height: 150px;
             background-color: #333;
             border: 2px solid #555;
             border-radius: 8px;
@@ -65,7 +65,6 @@
             bottom: 50%;
             transition: bottom 0.2s ease;
         }
-        /* New slider controls styling */
         .controls { margin-top: 15px; width: 90%; max-width: 300px; }
         .control-group { margin-bottom: 10px; text-align: left; }
         .control-group label { display: block; margin-bottom: 5px; font-size: 0.9em; }
@@ -74,7 +73,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v2.0)</button>
+        <button id="startButton">Start Monitoring (v2.1)</button>
         <div id="mainContent">
             <div id="visualizerContainer">
                 <div id="soundBar"></div>
@@ -93,6 +92,10 @@
                     <label for="sensitivitySlider">Disturbance Sensitivity: <span id="sensitivityValue">50</span></label>
                     <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
                 </div>
+                 <div class="control-group">
+                    <label for="durationSlider">Play Duration: <span id="durationValue">30s</span></label>
+                    <input type="range" id="durationSlider" min="1" max="100" value="25">
+                </div>
             </div>
             <div id="shushMessage">Shusssshhhhh</div>
         </div>
@@ -105,17 +108,21 @@
         const triggerSlider = document.getElementById('triggerSlider');
         const volumeSlider = document.getElementById('volumeSlider');
         const sensitivitySlider = document.getElementById('sensitivitySlider');
+        const durationSlider = document.getElementById('durationSlider');
         const triggerValueSpan = document.getElementById('triggerValue');
         const volumeValueSpan = document.getElementById('volumeValue');
         const sensitivityValueSpan = document.getElementById('sensitivityValue');
+        const durationValueSpan = document.getElementById('durationValue');
         const triggerLine = document.getElementById('triggerLine');
 
         // --- CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
-        let soundSensitivity = 50; // Raw sound threshold
-        let maxNoiseVolume = 0.5; // 0.0 to 1.0
+        let soundSensitivity = 50;
+        let maxNoiseVolume = 0.5;
+        let playDurationAfterTrigger = 30; // in seconds
         let isMonitoring = false;
         let animationFrameId = null;
+        let stopSoundTimer = null;
 
         let breachRecords = [];
         let disturbanceHistory = [];
@@ -126,7 +133,7 @@
         let streamSource;
         let whiteNoiseNode = null;
         let lfoNode = null;
-        let lfoGain = null; // Separate LFO gain for real-time updates
+        let lfoGain = null;
         let masterGainNode = null;
 
         // --- EVENT LISTENERS ---
@@ -148,17 +155,32 @@
             const newVolume = parseInt(e.target.value);
             maxNoiseVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
-            
-            // If the LFO is active, update its gain in real-time
             if (lfoGain) {
                 lfoGain.gain.setTargetAtTime(0.04 * maxNoiseVolume, audioContext.currentTime, 0.1);
             }
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
-            // Reverse the slider: 1 is most sensitive (low threshold), 100 is least sensitive (high threshold)
             soundSensitivity = 101 - parseInt(e.target.value);
             sensitivityValueSpan.textContent = e.target.value;
+        });
+        
+        durationSlider.addEventListener('input', (e) => {
+            const sliderValue = parseInt(e.target.value);
+            // Logarithmic scale for duration: slider 1-100 maps to 5s - 30m
+            const minSec = 5;
+            const maxSec = 1800; // 30 minutes
+            const minLog = Math.log(minSec);
+            const maxLog = Math.log(maxSec);
+            const scale = (maxLog - minLog) / 99;
+            playDurationAfterTrigger = Math.exp(minLog + scale * (sliderValue - 1));
+
+            // Update display text
+            if (playDurationAfterTrigger < 60) {
+                durationValueSpan.textContent = `${Math.round(playDurationAfterTrigger)}s`;
+            } else {
+                durationValueSpan.textContent = `${Math.round(playDurationAfterTrigger / 60)}m`;
+            }
         });
 
         // --- CORE LOGIC ---
@@ -200,16 +222,24 @@
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
                     if (disturbanceLevel > disturbanceTriggerLevel) {
+                        if (stopSoundTimer) {
+                            clearTimeout(stopSoundTimer);
+                            stopSoundTimer = null;
+                        }
                         manageWhiteNoise();
-                    }
 
-                    if (disturbanceLevel > disturbanceTriggerLevel && !isShushing) {
-                        isShushing = true; 
-                        document.getElementById('shushMessage').style.display = 'block';
-                        setTimeout(() => {
-                            document.getElementById('shushMessage').style.display = 'none';
-                            isShushing = false;
-                        }, 10000);
+                        if (!isShushing) {
+                            isShushing = true; 
+                            document.getElementById('shushMessage').style.display = 'block';
+                            setTimeout(() => {
+                                document.getElementById('shushMessage').style.display = 'none';
+                                isShushing = false;
+                            }, 10000);
+                        }
+                    } else {
+                        if (whiteNoiseNode && !stopSoundTimer) {
+                            stopSoundTimer = setTimeout(stopWhiteNoise, playDurationAfterTrigger * 1000);
+                        }
                     }
                     
                     animationFrameId = requestAnimationFrame(mainLoop);
@@ -225,6 +255,8 @@
         function stopMonitoring() {
             if (!isMonitoring) return;
             cancelAnimationFrame(animationFrameId);
+            if (stopSoundTimer) clearTimeout(stopSoundTimer);
+            stopSoundTimer = null;
             stopWhiteNoise();
             
             if (streamSource) {
@@ -240,7 +272,7 @@
             animationFrameId = null;
             streamSource = null;
             mainContent.style.display = 'none';
-            startButton.textContent = `Start Monitoring (v2.0)`;
+            startButton.textContent = `Start Monitoring (v2.1)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -264,19 +296,18 @@
 
                 lfoNode = audioContext.createOscillator();
                 lfoNode.type = 'sine';
-                lfoNode.frequency.setValueAtTime(0.2, audioContext.currentTime);
-                lfoGain = audioContext.createGain(); // Assign to the global variable
+                lfoNode.frequency.setValueAtTime(1/9, audioContext.currentTime); // 9 second period
+                lfoGain = audioContext.createGain();
                 lfoGain.gain.setValueAtTime(0.04 * maxNoiseVolume, audioContext.currentTime);
                 lfoNode.connect(lfoGain);
                 lfoGain.connect(masterGainNode.gain);
 
                 const now = audioContext.currentTime;
                 masterGainNode.gain.setValueAtTime(0.0001, now);
-                masterGainNode.gain.setTargetAtTime(peakVolume, now, 12.0); // Even slower ramp-up (12.0)
+                masterGainNode.gain.linearRampToValueAtTime(peakVolume, now + 4.0); // 4-second linear ramp-up
 
                 whiteNoiseNode.start(now);
                 lfoNode.start(now);
-                setTimeout(stopWhiteNoise, 30000);
             } else {
                 masterGainNode.gain.setTargetAtTime(peakVolume, audioContext.currentTime, 1.5);
             }
@@ -285,26 +316,25 @@
         function stopWhiteNoise() {
             if (!masterGainNode) return;
             const now = audioContext.currentTime;
-            masterGainNode.gain.setTargetAtTime(0.0001, now, 1.5);
-            const stopTime = now + 5;
-
-            if(whiteNoiseNode) {
-                try { whiteNoiseNode.stop(stopTime); } catch(e) {}
-                whiteNoiseNode.disconnect();
-            }
-            if(lfoNode) {
-                try { lfoNode.stop(stopTime); } catch(e) {}
-                lfoNode.disconnect();
-            }
-            if(lfoGain) {
-                lfoGain.disconnect();
-            }
+            const stopTime = now + 4.0; // 4-second ramp-down duration
             
-            masterGainNode.disconnect();
-            whiteNoiseNode = null;
-            lfoNode = null;
-            lfoGain = null;
-            masterGainNode = null;
+            masterGainNode.gain.cancelScheduledValues(now); // Clear any pending changes
+            masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now); // Start ramp from current value
+            masterGainNode.gain.linearRampToValueAtTime(0.0001, stopTime);
+
+            if(whiteNoiseNode) { try { whiteNoiseNode.stop(stopTime); } catch(e) {} }
+            if(lfoNode) { try { lfoNode.stop(stopTime); } catch(e) {} }
+            
+            setTimeout(() => {
+                if(whiteNoiseNode) whiteNoiseNode.disconnect();
+                if(lfoNode) lfoNode.disconnect();
+                if(lfoGain) lfoGain.disconnect();
+                if(masterGainNode) masterGainNode.disconnect();
+                whiteNoiseNode = null;
+                lfoNode = null;
+                lfoGain = null;
+                masterGainNode = null;
+            }, 4000);
         }
 
         function calculateAverageDisturbance() {
@@ -323,12 +353,11 @@
                 const recencyWeight = (record.timestamp - tenSecondsAgo) / 10000;
                 totalScore += record.magnitude * recencyWeight;
             }
-            const scoreAsPercentage = Math.min(1.0, totalScore / 5000); // Using a fixed factor now
+            const scoreAsPercentage = Math.min(1.0, totalScore / 5000);
             const curvedScore = Math.pow(scoreAsPercentage, 2.0);
             return Math.round(curvedScore * 100);
         }
     </script>
 </body>
 </html>
-
 
