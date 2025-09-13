@@ -6,36 +6,71 @@
 Thunkable Advanced: Continuous Sound Monitoring with a Web App
 for low-level sound monitoring in a Thunkable app. Since Thunkable's native components are limited, this simple web application will handle the audio processing and embed it using the Web Viewer component.
 
-
 <!DOCTYPE html>
 <html>
 <head>
     <title>Audio Processor</title>
     <style>
         /* Basic styling to show it's working */
-        body { font-family: sans-serif; background-color: #282828; color: white; text-align: center; padding-top: 50px; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            background-color: #1a1a1a; 
+            color: #e0e0e0; 
+            text-align: center; 
+            padding-top: 30px; 
+            touch-action: none;
+        }
+        h2 {
+            font-weight: 300;
+            font-size: 1.5em;
+        }
+        #noiseLevelDisplay {
+            font-weight: 600;
+            color: #4CAF50;
+        }
+        #thresholdDisplay {
+            font-weight: 600;
+            color: #FFC107;
+        }
+        #shushMessage {
+            display: none; 
+            font-size: 4em; 
+            font-weight: bold;
+            color: #F44336; 
+            margin-top: 40px;
+            animation: fadeIn 0.5s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        #status {
+            font-size: 0.8em;
+            color: #888;
+        }
     </style>
 </head>
 <body>
-    <h1>Sound Monitor Active</h1>
+    <h2>Noise Level: <span id="noiseLevelDisplay">0</span></h2>
+    <h2>Noise Threshold: <span id="thresholdDisplay">50</span></h2>
+    
+    <div id="shushMessage">Shusssshhhhh</div>
+
     <p id="status">Waiting for microphone permission...</p>
-    <p>Current Threshold: <span id="thresholdDisplay">50</span></p>
 
     <script>
-        // Check if the Thunkable Web Viewer Extension is available
-        const isThunkable = !!window.ThunkableWebviewerExtension;
         let volumeThreshold = 50; // Default threshold
+        let exceedTimestamps = []; // Array to store timestamps of threshold breaches
+        let isShushing = false; // Flag to prevent multiple timeouts
 
-        // --- NEW: Listen for messages from Thunkable ---
+        // Listen for messages from Thunkable to set the threshold
         window.addEventListener('message', function(event) {
-            // We expect a message like "SET_THRESHOLD:75"
             const message = event.data;
             if (typeof message === 'string' && message.startsWith('SET_THRESHOLD:')) {
                 const newThreshold = Number(message.split(':')[1]);
                 if (!isNaN(newThreshold)) {
                     volumeThreshold = newThreshold;
-                    document.getElementById('thresholdDisplay').textContent = volumeThreshold;
-                    console.log('New threshold set:', volumeThreshold);
+                    document.getElementById('thresholdDisplay').textContent = Math.round(volumeThreshold);
                 }
             }
         });
@@ -43,10 +78,10 @@ for low-level sound monitoring in a Thunkable app. Since Thunkable's native comp
         async function startMonitoring() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                document.getElementById('status').textContent = 'Microphone connected!';
+                document.getElementById('status').style.display = 'none';
 
                 const audioContext = new AudioContext();
-                const mediaStreamSource = audioContext.createMediaStreamSource(stream);
+                const mediaStreamSource = audio.createMediaStreamSource(stream);
                 const analyser = audioContext.createAnalyser();
                 analyser.fftSize = 256;
                 mediaStreamSource.connect(analyser);
@@ -59,13 +94,35 @@ for low-level sound monitoring in a Thunkable app. Since Thunkable's native comp
                     for (const amplitude of dataArray) {
                         sum += amplitude * amplitude;
                     }
-                    const volume = Math.sqrt(sum / dataArray.length);
+                    const rawVolume = Math.sqrt(sum / dataArray.length);
+                    // Scale the raw volume to a more user-friendly 0-100 range and clamp it
+                    const scaledVolume = Math.min(100, Math.round(rawVolume * 1.5));
 
-                    // --- UPDATED: Use the variable threshold ---
-                    if (volume > volumeThreshold) {
-                        console.log('Loud sound detected!', volume);
-                        if (isThunkable) {
-                            ThunkableWebviewerExtension.postMessage('LOUD_SOUND_DETECTED');
+                    // Update the "Noise Level" display in real-time
+                    document.getElementById('noiseLevelDisplay').textContent = scaledVolume;
+                    
+                    // --- NEW TRIGGER LOGIC ---
+                    if (scaledVolume > volumeThreshold && !isShushing) {
+                        const now = Date.now();
+                        exceedTimestamps.push(now);
+
+                        // Remove timestamps older than 10 seconds
+                        exceedTimestamps = exceedTimestamps.filter(ts => now - ts < 10000);
+
+                        // Check if condition is met (> 2 times in 10s)
+                        if (exceedTimestamps.length > 2) {
+                            isShushing = true;
+                            const shushElement = document.getElementById('shushMessage');
+                            shushElement.style.display = 'block';
+
+                            // Reset the counter
+                            exceedTimestamps = [];
+
+                            // Hide the message after 10 seconds
+                            setTimeout(() => {
+                                shushElement.style.display = 'none';
+                                isShushing = false; // Allow triggering again
+                            }, 10000);
                         }
                     }
                     
@@ -80,7 +137,13 @@ for low-level sound monitoring in a Thunkable app. Since Thunkable's native comp
             }
         }
 
-        startMonitoring();
+        // Request microphone permission on first user interaction
+        document.body.addEventListener('click', () => {
+             if (typeof audioContext === 'undefined') {
+                 startMonitoring();
+             }
+        }, { once: true });
+
     </script>
 </body>
 </html>
