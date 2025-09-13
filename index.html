@@ -2,8 +2,12 @@
 <html>
 <head>
     <title>Audio Processor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { 
+        * {
+            box-sizing: border-box;
+        }
+        html, body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
             background-color: #212121;
             color: #e0e0e0; 
@@ -12,9 +16,11 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            height: 100%;
+            width: 100%;
             overflow: hidden;
             margin: 0;
+            padding: 10px;
         }
         #shushMessage {
             display: none; 
@@ -69,12 +75,14 @@
         .control-group { margin-bottom: 10px; text-align: left; }
         .control-group label { display: block; margin-bottom: 5px; font-size: 0.9em; }
         .control-group input[type="range"] { width: 100%; }
+        #soundLevelDisplay { margin-bottom: 5px; }
     </style>
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v2.1)</button>
+        <button id="startButton">Start Monitoring (v2.3)</button>
         <div id="mainContent">
+             <div id="soundLevelDisplay">Detected Sound: <span id="soundLevelValue">0</span></div>
             <div id="visualizerContainer">
                 <div id="soundBar"></div>
                 <div id="triggerLine"></div>
@@ -96,6 +104,14 @@
                     <label for="durationSlider">Play Duration: <span id="durationValue">30s</span></label>
                     <input type="range" id="durationSlider" min="1" max="100" value="25">
                 </div>
+                 <div class="control-group">
+                    <label for="rampSlider">Ramp Period: <span id="rampValue">4s</span></label>
+                    <input type="range" id="rampSlider" min="1" max="10" value="4">
+                </div>
+                 <div class="control-group">
+                    <label for="oscillationSlider">Oscillation Period: <span id="oscillationValue">9s</span></label>
+                    <input type="range" id="oscillationSlider" min="2" max="20" value="9">
+                </div>
             </div>
             <div id="shushMessage">Shusssshhhhh</div>
         </div>
@@ -109,17 +125,24 @@
         const volumeSlider = document.getElementById('volumeSlider');
         const sensitivitySlider = document.getElementById('sensitivitySlider');
         const durationSlider = document.getElementById('durationSlider');
+        const rampSlider = document.getElementById('rampSlider');
+        const oscillationSlider = document.getElementById('oscillationSlider');
         const triggerValueSpan = document.getElementById('triggerValue');
         const volumeValueSpan = document.getElementById('volumeValue');
         const sensitivityValueSpan = document.getElementById('sensitivityValue');
         const durationValueSpan = document.getElementById('durationValue');
+        const rampValueSpan = document.getElementById('rampValue');
+        const oscillationValueSpan = document.getElementById('oscillationValue');
         const triggerLine = document.getElementById('triggerLine');
+        const soundLevelValue = document.getElementById('soundLevelValue');
 
         // --- CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
         let soundSensitivity = 50;
         let maxNoiseVolume = 0.5;
         let playDurationAfterTrigger = 30; // in seconds
+        let rampPeriod = 4; // in seconds
+        let oscillationPeriod = 9; // in seconds
         let isMonitoring = false;
         let animationFrameId = null;
         let stopSoundTimer = null;
@@ -167,7 +190,6 @@
         
         durationSlider.addEventListener('input', (e) => {
             const sliderValue = parseInt(e.target.value);
-            // Logarithmic scale for duration: slider 1-100 maps to 5s - 30m
             const minSec = 5;
             const maxSec = 1800; // 30 minutes
             const minLog = Math.log(minSec);
@@ -175,13 +197,26 @@
             const scale = (maxLog - minLog) / 99;
             playDurationAfterTrigger = Math.exp(minLog + scale * (sliderValue - 1));
 
-            // Update display text
             if (playDurationAfterTrigger < 60) {
                 durationValueSpan.textContent = `${Math.round(playDurationAfterTrigger)}s`;
             } else {
                 durationValueSpan.textContent = `${Math.round(playDurationAfterTrigger / 60)}m`;
             }
         });
+        
+        rampSlider.addEventListener('input', (e) => {
+            rampPeriod = parseInt(e.target.value);
+            rampValueSpan.textContent = `${rampPeriod}s`;
+        });
+
+        oscillationSlider.addEventListener('input', (e) => {
+            oscillationPeriod = parseInt(e.target.value);
+            oscillationValueSpan.textContent = `${oscillationPeriod}s`;
+            if (lfoNode) {
+                lfoNode.frequency.setValueAtTime(1 / oscillationPeriod, audioContext.currentTime);
+            }
+        });
+
 
         // --- CORE LOGIC ---
         async function startMonitoring() {
@@ -209,6 +244,7 @@
                     for (const amplitude of dataArray) { sum += amplitude * amplitude; }
                     const rawVolume = Math.sqrt(sum / dataArray.length);
                     const scaledVolume = Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
+                    soundLevelValue.textContent = scaledVolume;
                     
                     if (scaledVolume > soundSensitivity) {
                         breachRecords.push({ timestamp: Date.now(), magnitude: scaledVolume - soundSensitivity });
@@ -272,14 +308,13 @@
             animationFrameId = null;
             streamSource = null;
             mainContent.style.display = 'none';
-            startButton.textContent = `Start Monitoring (v2.1)`;
+            startButton.textContent = `Start Monitoring (v2.3)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
         function manageWhiteNoise() {
-            const avgDisturbance = calculateAverageDisturbance();
-            const clampedAvg = Math.max(disturbanceTriggerLevel, avgDisturbance);
-            const peakVolume = (((clampedAvg - disturbanceTriggerLevel) / (100 - disturbanceTriggerLevel)) * 0.4 + 0.1) * maxNoiseVolume;
+            // *** CHANGED: peakVolume is now ONLY controlled by the volume slider ***
+            const peakVolume = maxNoiseVolume;
 
             if (!whiteNoiseNode) {
                 masterGainNode = audioContext.createGain();
@@ -296,7 +331,7 @@
 
                 lfoNode = audioContext.createOscillator();
                 lfoNode.type = 'sine';
-                lfoNode.frequency.setValueAtTime(1/9, audioContext.currentTime); // 9 second period
+                lfoNode.frequency.setValueAtTime(1 / oscillationPeriod, audioContext.currentTime);
                 lfoGain = audioContext.createGain();
                 lfoGain.gain.setValueAtTime(0.04 * maxNoiseVolume, audioContext.currentTime);
                 lfoNode.connect(lfoGain);
@@ -304,11 +339,12 @@
 
                 const now = audioContext.currentTime;
                 masterGainNode.gain.setValueAtTime(0.0001, now);
-                masterGainNode.gain.linearRampToValueAtTime(peakVolume, now + 4.0); // 4-second linear ramp-up
+                masterGainNode.gain.linearRampToValueAtTime(peakVolume, now + rampPeriod);
 
                 whiteNoiseNode.start(now);
                 lfoNode.start(now);
             } else {
+                // If noise is already playing, just adjust to the current volume
                 masterGainNode.gain.setTargetAtTime(peakVolume, audioContext.currentTime, 1.5);
             }
         }
@@ -316,10 +352,10 @@
         function stopWhiteNoise() {
             if (!masterGainNode) return;
             const now = audioContext.currentTime;
-            const stopTime = now + 4.0; // 4-second ramp-down duration
+            const stopTime = now + rampPeriod;
             
-            masterGainNode.gain.cancelScheduledValues(now); // Clear any pending changes
-            masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now); // Start ramp from current value
+            masterGainNode.gain.cancelScheduledValues(now);
+            masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
             masterGainNode.gain.linearRampToValueAtTime(0.0001, stopTime);
 
             if(whiteNoiseNode) { try { whiteNoiseNode.stop(stopTime); } catch(e) {} }
@@ -334,7 +370,7 @@
                 lfoNode = null;
                 lfoGain = null;
                 masterGainNode = null;
-            }, 4000);
+            }, rampPeriod * 1000);
         }
 
         function calculateAverageDisturbance() {
@@ -360,4 +396,5 @@
     </script>
 </body>
 </html>
+
 
