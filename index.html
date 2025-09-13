@@ -15,10 +15,10 @@
             touch-action: none;
             display: flex;
             justify-content: center;
-            align-items: flex-start; /* Align to top for scrolling */
+            align-items: flex-start;
             height: 100%;
             width: 100%;
-            overflow-y: auto; /* Allow scrolling on small screens */
+            overflow-y: auto;
             margin: 0;
             padding: 20px 10px;
         }
@@ -51,7 +51,7 @@
         }
         #statusTextContainer {
             text-align: left;
-            min-width: 160px; /* Lock width to prevent layout shifts */
+            min-width: 160px;
         }
         #visualizerContainer {
             width: 80px;
@@ -81,12 +81,11 @@
             transition: bottom 0.2s ease;
         }
         .controls { margin-top: 15px; width: 90%; max-width: 300px; }
-        .control-group { margin-bottom: 10px; text-align: left; }
+        .control-group { margin-bottom: 10px; text-align: left; position: relative; }
         .control-group label { display: block; margin-bottom: 5px; font-size: 0.9em; }
         .control-group input[type="range"] { width: 100%; }
         .status-display { margin-bottom: 5px; }
         
-        /* Screensaver Styles */
         #screensaver {
             position: fixed;
             top: 0;
@@ -95,7 +94,7 @@
             height: 100vh;
             background-color: #000;
             z-index: 100;
-            display: none; /* Hidden by default */
+            display: none;
             flex-direction: column;
             justify-content: center;
             align-items: center;
@@ -117,7 +116,6 @@
             color: #ccc;
         }
 
-        /* Advanced Settings & Switch Styles */
         .advanced-controls summary {
             cursor: pointer;
             padding: 8px;
@@ -141,13 +139,49 @@
             align-items: center;
             justify-content: space-between;
         }
+        .info-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: #888;
+            color: #212121;
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            line-height: 16px;
+            cursor: pointer;
+            margin-left: 8px;
+            user-select: none;
+        }
+        .tooltip {
+            visibility: hidden;
+            width: 200px;
+            background-color: #555;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .tooltip.show {
+            visibility: visible;
+            opacity: 1;
+        }
 
     </style>
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.5)</button>
+        <button id="startButton">Start Monitoring (v3.6)</button>
         <div id="mainContent" style="width: 100%;">
+            <h2>Noise Disturbance</h2>
             <div id="displayArea">
                 <div id="visualizerContainer">
                     <div id="soundBar"></div>
@@ -155,7 +189,6 @@
                 </div>
                 <div id="statusTextContainer">
                     <div class="status-display">Detected Sound: <span id="soundLevelValue">0</span></div>
-                    <div class="status-display">Replay Volume: <span id="replayVolumeValue">0</span></div>
                     <div class="status-display" id="activationStatus">-</div>
                 </div>
             </div>
@@ -163,18 +196,31 @@
                 <div class="control-group">
                     <label for="triggerSlider">Disturbance Trigger: <span id="triggerValue">50</span></label>
                     <input type="range" id="triggerSlider" min="10" max="95" value="50">
+                    <span class="info-icon" data-tooltip-id="tooltip-trigger">?</span>
+                    <div class="tooltip" id="tooltip-trigger">Sets the disturbance level (line on the bar) required to activate sound. A lower value is more sensitive.</div>
+                </div>
+                <div class="control-group">
+                    <label for="sensitivitySlider">Sensitivity: <span id="sensitivityValue">50</span></label>
+                    <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
+                     <span class="info-icon" data-tooltip-id="tooltip-sensitivity">?</span>
+                    <div class="tooltip" id="tooltip-sensitivity">Adjusts microphone sensitivity. Higher values make it easier for quieter sounds to register as a disturbance.</div>
                 </div>
                 <div class="control-group">
                     <label for="volumeSlider">Target Volume: <span id="volumeValue">50%</span></label>
                     <input type="range" id="volumeSlider" min="0" max="100" value="50">
-                </div>
-                <div class="control-group">
-                    <label for="sensitivitySlider">Sound Sensitivity: <span id="sensitivityValue">50</span></label>
-                    <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
+                     <span class="info-icon" data-tooltip-id="tooltip-volume">?</span>
+                    <div class="tooltip" id="tooltip-volume">The maximum volume the white noise will reach after being activated.</div>
                 </div>
                  <div class="control-group">
-                    <label for="durationSlider">Decay Duration: <span id="durationValue">30s</span></label>
+                    <label for="durationSlider">Playing Time: <span id="durationValue">30s</span></label>
                     <input type="range" id="durationSlider" min="1" max="100" value="25">
+                     <span class="info-icon" data-tooltip-id="tooltip-duration">?</span>
+                    <div class="tooltip" id="tooltip-duration">How long the white noise will gently fade out for after it has been activated and the disturbance ends.</div>
+                </div>
+                
+                <div class="control-group switch-group">
+                    <label for="screensaverToggle">Enable Screensaver</label>
+                    <input type="checkbox" id="screensaverToggle" checked>
                 </div>
 
                 <details class="advanced-controls">
@@ -183,22 +229,23 @@
                         <div class="control-group">
                             <label for="rampSlider">Ramp Period: <span id="rampValue">4s</span></label>
                             <input type="range" id="rampSlider" min="1" max="10" value="4">
+                             <span class="info-icon" data-tooltip-id="tooltip-ramp">?</span>
+                            <div class="tooltip" id="tooltip-ramp">How quickly the sound fades in to the target volume when activated.</div>
                         </div>
                         <div class="control-group">
                             <label for="oscillationSlider">Oscillation Period: <span id="oscillationValue">9s</span></label>
                             <input type="range" id="oscillationSlider" min="2" max="20" value="9">
+                            <span class="info-icon" data-tooltip-id="tooltip-period">?</span>
+                            <div class="tooltip" id="tooltip-period">The time it takes for the volume to complete one full wave (up and down) around the target volume.</div>
                         </div>
                         <div class="control-group">
                             <label for="oscillationDepthSlider">Oscillation Depth: <span id="oscillationDepthValue">50%</span></label>
                             <input type="range" id="oscillationDepthSlider" min="0" max="100" value="50">
+                            <span class="info-icon" data-tooltip-id="tooltip-depth">?</span>
+                            <div class="tooltip" id="tooltip-depth">How much the volume varies during oscillation. 0% is no oscillation, 100% will cause the volume to swing between silent and double the target.</div>
                         </div>
                     </div>
                 </details>
-                
-                <div class="control-group switch-group">
-                    <label for="screensaverToggle">Enable Screensaver</label>
-                    <input type="checkbox" id="screensaverToggle" checked>
-                </div>
             </div>
             <div id="shushMessage">Shusssshhhhh</div>
         </div>
@@ -230,19 +277,18 @@
         const oscillationDepthValueSpan = document.getElementById('oscillationDepthValue');
         const triggerLine = document.getElementById('triggerLine');
         const soundLevelValue = document.getElementById('soundLevelValue');
-        const replayVolumeValue = document.getElementById('replayVolumeValue');
         const activationStatus = document.getElementById('activationStatus');
         const screensaver = document.getElementById('screensaver');
         const returnButton = document.getElementById('returnButton');
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
-        let soundSensitivity = 50;
+        let soundSensitivity = 0.5; // Recalibrated
         let targetVolume = 0.5;
         let decayDuration = 30;
         let rampPeriod = 4;
         let oscillationPeriod = 9;
-        let oscillationDepth = 0.5; // Default to 50%
+        let oscillationDepth = 0.5;
         let isMonitoring = false;
         let screensaverEnabled = true;
         let animationFrameId = null;
@@ -251,31 +297,50 @@
         let allTimeouts = [];
         let decayEndTime = null;
         let inactivityTimer = null;
+        let isMicActive = false; // New flag to track if mic is on
         
         // --- SECTION 3: AUDIO API & STATE VARIABLES ---
         let audioContext;
         let streamSource;
+        let mediaStreamSource;
+        let analyser;
+        let dataArray;
         let whiteNoiseNode = null;
         let lfoNode = null;
         let lfoGain = null;
         let masterGainNode = null;
-        let audioState = 'idle'; // 'idle', 'rampingUp', 'holdingAfterRampUp', 'decaying', 'holdingAfterInterrupt'
+        let audioState = 'idle';
 
         // --- SECTION 4: EVENT LISTENERS ---
         startButton.addEventListener('click', () => {
             resetInactivityTimer();
-            if (isMonitoring) {
-                stopMonitoring();
+            if (!isMicActive) {
+                initializeMicrophone();
+            } else if (isMonitoring) {
+                stopPlaybackAndMonitoring();
             } else {
-                startMonitoring();
+                startPlaybackAndMonitoring();
             }
         });
 
         returnButton.addEventListener('click', resetInactivityTimer);
         screensaverToggle.addEventListener('change', (e) => {
             screensaverEnabled = e.target.checked;
-            resetInactivityTimer(); // Reset timer to apply new setting immediately
+            resetInactivityTimer();
         });
+
+        document.querySelectorAll('.info-icon').forEach(icon => {
+            const tooltipId = icon.getAttribute('data-tooltip-id');
+            const tooltip = document.getElementById(tooltipId);
+            icon.addEventListener('click', (e) => {
+                e.stopPropagation();
+                tooltip.classList.toggle('show');
+            });
+        });
+        document.addEventListener('click', () => {
+            document.querySelectorAll('.tooltip.show').forEach(t => t.classList.remove('show'));
+        });
+
 
         [triggerSlider, volumeSlider, sensitivitySlider, durationSlider, rampSlider, oscillationSlider, oscillationDepthSlider].forEach(slider => {
             slider.addEventListener('input', resetInactivityTimer);
@@ -300,8 +365,10 @@
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
-            soundSensitivity = 101 - parseInt(e.target.value);
-            sensitivityValueSpan.textContent = e.target.value;
+            const sliderValue = parseInt(e.target.value);
+            // Non-linear mapping to make lower end more sensitive
+            soundSensitivity = Math.pow(sliderValue / 100, 2);
+            sensitivityValueSpan.textContent = sliderValue;
         });
         
         durationSlider.addEventListener('input', (e) => {
@@ -337,14 +404,8 @@
 
 
         // --- SECTION 5: CORE LOGIC ---
-        async function startMonitoring() {
-            if (isMonitoring) return;
-            isMonitoring = true;
-            startButton.textContent = 'Stop Monitoring';
-            startButton.style.backgroundColor = '#C62828';
-            resetInactivityTimer(); // Start the timer when monitoring begins
-
-            try {
+        async function initializeMicrophone() {
+             try {
                 audioContext = new AudioContext();
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { 
@@ -356,90 +417,79 @@
                 });
                 streamSource = stream;
                 
-                const mediaStreamSource = audioContext.createMediaStreamSource(stream);
-                const analyser = audioContext.createAnalyser();
+                mediaStreamSource = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
                 analyser.fftSize = 256;
                 mediaStreamSource.connect(analyser);
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-                function mainLoop() {
-                    analyser.getByteFrequencyData(dataArray);
-                    
-                    const scaledVolume = calculateLogVolume(dataArray);
-                    soundLevelValue.textContent = scaledVolume;
-                    
-                    if (scaledVolume > soundSensitivity) {
-                        breachRecords.push({ timestamp: Date.now(), magnitude: scaledVolume - soundSensitivity });
-                    }
+                isMicActive = true;
+                mainLoop(); // Start continuous analysis
+                startPlaybackAndMonitoring(); // Transition to active monitoring state
 
-                    const disturbanceLevel = calculateDisturbanceLevel();
-                    document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
-
-                    if (masterGainNode) {
-                        replayVolumeValue.textContent = Math.round(masterGainNode.gain.value * 100);
-                    } else {
-                        replayVolumeValue.textContent = 0;
-                    }
-                    
-                    if (audioState === 'decaying' && decayEndTime) {
-                        const remaining = Math.max(0, (decayEndTime - Date.now()) / 1000);
-                        activationStatus.textContent = `Time Remaining: ${remaining.toFixed(1)}s`;
-                    } else if (audioState !== 'idle' && audioState !== 'decaying') {
-                        activationStatus.textContent = 'Activated';
-                    } else {
-                        activationStatus.textContent = '-';
-                    }
-
-                    if (disturbanceLevel > disturbanceTriggerLevel) {
-                        triggerSoundPlayback();
-                        if (!isShushing) {
-                           showShushMessage();
-                        }
-                    }
-                    animationFrameId = requestAnimationFrame(mainLoop);
-                }
-                mainLoop();
-            
             } catch (err) {
                 console.error('Error:', err);
-                stopMonitoring();
+                startButton.textContent = "Mic Error - Refresh";
             }
         }
+        
+        function startPlaybackAndMonitoring() {
+            isMonitoring = true;
+            startButton.textContent = 'Stop Monitoring';
+            startButton.style.backgroundColor = '#C62828';
+            resetInactivityTimer();
+        }
 
-        function stopMonitoring() {
-            if (!isMonitoring) return;
-
-            cancelAnimationFrame(animationFrameId);
+        function stopPlaybackAndMonitoring() {
+            isMonitoring = false;
             clearAllTimeouts();
+            cleanupAudioNodes();
             if (inactivityTimer) {
                 clearTimeout(inactivityTimer);
                 inactivityTimer = null;
             }
             hideScreensaver();
             
-            if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
-            if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
-            if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
-            if (masterGainNode) { try { masterGainNode.disconnect(); } catch (e) {} }
-            
-            whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
-            audioState = 'idle';
-            
-            if (streamSource) {
-                streamSource.getTracks().forEach(track => track.stop());
-            }
-
-            isMonitoring = false;
             breachRecords = [];
-            animationFrameId = null;
-            streamSource = null;
             decayEndTime = null;
-            
-            startButton.textContent = `Start Monitoring (v3.5)`;
+            startButton.textContent = `Start Monitoring (v3.6)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
-        // --- SECTION 6: SMOOTH AUDIO ENGINE (RAMP UP & DECAY MODEL) ---
+        function mainLoop() {
+            if (!isMicActive) return;
+
+            analyser.getByteFrequencyData(dataArray);
+            
+            const scaledVolume = calculateLogVolume(dataArray);
+            soundLevelValue.textContent = scaledVolume;
+            
+            const disturbanceLevel = calculateDisturbanceLevel(scaledVolume);
+            document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
+            
+            if (isMonitoring) {
+                 if (disturbanceLevel > disturbanceTriggerLevel) {
+                    triggerSoundPlayback();
+                    if (!isShushing) {
+                       showShushMessage();
+                    }
+                }
+            }
+
+            if (audioState === 'decaying' && decayEndTime) {
+                const remaining = Math.max(0, (decayEndTime - Date.now()) / 1000);
+                const displayTime = Math.round(remaining / 5) * 5;
+                activationStatus.textContent = `Time Remaining: ${displayTime}s`;
+            } else if (audioState !== 'idle' && audioState !== 'decaying') {
+                activationStatus.textContent = 'Activated';
+            } else {
+                activationStatus.textContent = '-';
+            }
+
+            animationFrameId = requestAnimationFrame(mainLoop);
+        }
+
+        // --- SECTION 6: SMOOTH AUDIO ENGINE ---
         function triggerSoundPlayback() {
             const now = audioContext.currentTime;
             
@@ -545,18 +595,18 @@
             if (inactivityTimer) clearTimeout(inactivityTimer);
             hideScreensaver();
             if (screensaverEnabled && isMonitoring) {
-                inactivityTimer = setTimeout(showScreensaver, 10000); // 10 seconds
+                inactivityTimer = setTimeout(showScreensaver, 10000);
             }
         }
 
         function showScreensaver() {
             screensaver.style.display = 'flex';
-            setTimeout(() => screensaver.style.opacity = '1', 10); // Fade in
+            setTimeout(() => screensaver.style.opacity = '1', 10);
         }
 
         function hideScreensaver() {
             screensaver.style.opacity = '0';
-            setTimeout(() => screensaver.style.display = 'none', 500); // Hide after fade out
+            setTimeout(() => screensaver.style.display = 'none', 500);
         }
 
         function scheduleTimeout(callback, delay) {
@@ -574,10 +624,17 @@
             let sum = 0;
             for (const amplitude of dataArray) { sum += amplitude * amplitude; }
             const rawVolume = Math.sqrt(sum / dataArray.length);
-            return Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
+            // Increased multiplier for more dynamic range
+            return Math.min(100, Math.round(25 * Math.log(rawVolume + 1)));
         }
 
-        function calculateDisturbanceLevel() {
+        function calculateDisturbanceLevel(currentVolume) {
+             // Map the sensitivity slider (0-1) to a threshold (100 -> 0)
+            const volumeThreshold = (1 - soundSensitivity) * 100;
+            if (currentVolume > volumeThreshold) {
+                breachRecords.push({ timestamp: Date.now(), magnitude: currentVolume - volumeThreshold });
+            }
+
             const now = Date.now();
             const tenSecondsAgo = now - 10000;
             breachRecords = breachRecords.filter(record => record.timestamp > tenSecondsAgo);
@@ -603,6 +660,7 @@
     </script>
 </body>
 </html>
+
 
 
 
