@@ -1,0 +1,86 @@
+
+
+
+
+
+Thunkable Advanced: Continuous Sound Monitoring with a Web App
+for low-level sound monitoring in a Thunkable app. Since Thunkable's native components are limited, this simple web application will handle the audio processing and embed it using the Web Viewer component.
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audio Processor</title>
+    <style>
+        /* Basic styling to show it's working */
+        body { font-family: sans-serif; background-color: #282828; color: white; text-align: center; padding-top: 50px; }
+    </style>
+</head>
+<body>
+    <h1>Sound Monitor Active</h1>
+    <p id="status">Waiting for microphone permission...</p>
+    <p>Current Threshold: <span id="thresholdDisplay">50</span></p>
+
+    <script>
+        // Check if the Thunkable Web Viewer Extension is available
+        const isThunkable = !!window.ThunkableWebviewerExtension;
+        let volumeThreshold = 50; // Default threshold
+
+        // --- NEW: Listen for messages from Thunkable ---
+        window.addEventListener('message', function(event) {
+            // We expect a message like "SET_THRESHOLD:75"
+            const message = event.data;
+            if (typeof message === 'string' && message.startsWith('SET_THRESHOLD:')) {
+                const newThreshold = Number(message.split(':')[1]);
+                if (!isNaN(newThreshold)) {
+                    volumeThreshold = newThreshold;
+                    document.getElementById('thresholdDisplay').textContent = volumeThreshold;
+                    console.log('New threshold set:', volumeThreshold);
+                }
+            }
+        });
+
+        async function startMonitoring() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                document.getElementById('status').textContent = 'Microphone connected!';
+
+                const audioContext = new AudioContext();
+                const mediaStreamSource = audioContext.createMediaStreamSource(stream);
+                const analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                mediaStreamSource.connect(analyser);
+
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                function checkSoundLevel() {
+                    analyser.getByteFrequencyData(dataArray);
+                    let sum = 0;
+                    for (const amplitude of dataArray) {
+                        sum += amplitude * amplitude;
+                    }
+                    const volume = Math.sqrt(sum / dataArray.length);
+
+                    // --- UPDATED: Use the variable threshold ---
+                    if (volume > volumeThreshold) {
+                        console.log('Loud sound detected!', volume);
+                        if (isThunkable) {
+                            ThunkableWebviewerExtension.postMessage('LOUD_SOUND_DETECTED');
+                        }
+                    }
+                    
+                    requestAnimationFrame(checkSoundLevel);
+                }
+
+                checkSoundLevel();
+
+            } catch (err) {
+                document.getElementById('status').textContent = 'Error accessing microphone: ' + err.message;
+                console.error('Error:', err);
+            }
+        }
+
+        startMonitoring();
+    </script>
+</body>
+</html>
