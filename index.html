@@ -79,7 +79,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v2.9)</button>
+        <button id="startButton">Start Monitoring (v3.1)</button>
         <div id="mainContent" style="width: 100%;">
              <div class="status-display">Detected Sound: <span id="soundLevelValue">0</span></div>
              <div class="status-display">Replay Volume: <span id="replayVolumeValue">0</span></div>
@@ -101,7 +101,7 @@
                     <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
                 </div>
                  <div class="control-group">
-                    <label for="durationSlider">Play Duration: <span id="durationValue">30s</span></label>
+                    <label for="durationSlider">Decay Duration: <span id="durationValue">30s</span></label>
                     <input type="range" id="durationSlider" min="1" max="100" value="25">
                 </div>
                  <div class="control-group">
@@ -146,17 +146,15 @@
         let disturbanceTriggerLevel = 50;
         let soundSensitivity = 50;
         let targetVolume = 0.5;
-        let playDurationAfterTrigger = 30;
+        let decayDuration = 30;
         let rampPeriod = 4;
         let oscillationPeriod = 9;
         let oscillationDepth = 0.1;
         let isMonitoring = false;
         let animationFrameId = null;
-        let stopSoundTimer = null;
-        let cooldownStartTime = null;
         let breachRecords = [];
         let isShushing = false;
-        let allTimeouts = []; // Array to track all scheduled timeouts for easy clearing
+        let allTimeouts = [];
         
         // --- SECTION 3: AUDIO API & STATE VARIABLES ---
         let audioContext;
@@ -165,8 +163,7 @@
         let lfoNode = null;
         let lfoGain = null;
         let masterGainNode = null;
-        // More descriptive audio states for precise control
-        let audioState = 'idle'; // 'idle', 'rampingUp', 'holdingBeforeOscillation', 'sustaining', 'awaitingStopPoint', 'holdingBeforeRampDown', 'rampingDown', 'holdingAfterInterrupt'
+        let audioState = 'idle'; // 'idle', 'rampingUp', 'holdingAfterRampUp', 'decaying', 'holdingAfterInterrupt'
 
         // --- SECTION 4: EVENT LISTENERS ---
         startButton.addEventListener('click', () => {
@@ -187,9 +184,6 @@
             const newVolume = parseInt(e.target.value);
             targetVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
-            if (masterGainNode) {
-                masterGainNode.gain.setTargetAtTime(targetVolume, audioContext.currentTime, 0.5);
-            }
             if (lfoGain) {
                 lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
             }
@@ -205,18 +199,8 @@
             const minSec = 5; const maxSec = 1800;
             const minLog = Math.log(minSec); const maxLog = Math.log(maxSec);
             const scale = (maxLog - minLog) / 99;
-            playDurationAfterTrigger = Math.exp(minLog + scale * (sliderValue - 1));
-            durationValueSpan.textContent = playDurationAfterTrigger < 60 ? `${Math.round(playDurationAfterTrigger)}s` : `${Math.round(playDurationAfterTrigger / 60)}m`;
-            if (stopSoundTimer && cooldownStartTime) {
-                clearTimeout(stopSoundTimer);
-                const elapsedTime = (Date.now() - cooldownStartTime) / 1000;
-                const newRemainingTime = playDurationAfterTrigger - elapsedTime;
-                if (newRemainingTime > 0) {
-                    stopSoundTimer = setTimeout(triggerSoundStop, newRemainingTime * 1000);
-                } else {
-                    triggerSoundStop();
-                }
-            }
+            decayDuration = Math.exp(minLog + scale * (sliderValue - 1));
+            durationValueSpan.textContent = decayDuration < 60 ? `${Math.round(decayDuration)}s` : `${Math.round(decayDuration / 60)}m`;
         });
         
         rampSlider.addEventListener('input', (e) => {
@@ -278,42 +262,11 @@
                     } else {
                         replayVolumeValue.textContent = 0;
                     }
-                    
-                    // --- State machine for smooth ramp down ---
-                    if (audioState === 'awaitingStopPoint') {
-                        const currentVolume = masterGainNode.gain.value;
-                        // Check if volume is close to target (within 1% margin)
-                        if (Math.abs(currentVolume - targetVolume) < (targetVolume * 0.01)) {
-                            const now = audioContext.currentTime;
-                            audioState = 'holdingBeforeRampDown';
-
-                            if (lfoGain.numberOfOutputs > 0) { try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {} }
-                            masterGainNode.gain.cancelScheduledValues(now);
-                            masterGainNode.gain.setValueAtTime(targetVolume, now);
-
-                            const holdTimeout = setTimeout(() => {
-                                if (audioState === 'holdingBeforeRampDown') {
-                                    audioState = 'rampingDown';
-                                    const rampDownStartTime = audioContext.currentTime;
-                                    masterGainNode.gain.linearRampToValueAtTime(0.0001, rampDownStartTime + rampPeriod);
-                                    const cleanupTimeout = setTimeout(cleanupAudioNodes, (rampPeriod + 1) * 1000);
-                                    allTimeouts.push(cleanupTimeout);
-                                }
-                            }, 1000);
-                            allTimeouts.push(holdTimeout);
-                        }
-                    }
 
                     if (disturbanceLevel > disturbanceTriggerLevel) {
-                        if (stopSoundTimer) { clearTimeout(stopSoundTimer); stopSoundTimer = null; cooldownStartTime = null; }
                         triggerSoundPlayback();
                         if (!isShushing) {
                            showShushMessage();
-                        }
-                    } else {
-                        if (audioState !== 'idle' && !stopSoundTimer && audioState !== 'rampingDown') {
-                            cooldownStartTime = Date.now();
-                            stopSoundTimer = setTimeout(triggerSoundStop, playDurationAfterTrigger * 1000);
                         }
                     }
                     animationFrameId = requestAnimationFrame(mainLoop);
@@ -328,80 +281,100 @@
 
         function stopMonitoring() {
             if (!isMonitoring) return;
+
+            // Stop the main animation loop
             cancelAnimationFrame(animationFrameId);
             clearAllTimeouts();
-            triggerSoundStop();
+            
+            // --- NEW: IMMEDIATE SOUND STOP ---
+            // This logic bypasses the state machine to shut down audio instantly.
+            if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
+            if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
+            if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
+            if (masterGainNode) { try { masterGainNode.disconnect(); } catch (e) {} }
+            
+            whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
+            audioState = 'idle';
+            // --- END IMMEDIATE SOUND STOP ---
             
             if (streamSource) {
                 streamSource.getTracks().forEach(track => track.stop());
             }
 
+            // Reset all state variables
             isMonitoring = false;
             breachRecords = [];
             animationFrameId = null;
             streamSource = null;
-            startButton.textContent = `Start Monitoring (v2.9)`;
+            
+            // Reset UI
+            startButton.textContent = `Start Monitoring (v3.1)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
-        // --- SECTION 6: SMOOTH AUDIO ENGINE ---
+        // --- SECTION 6: SMOOTH AUDIO ENGINE (RAMP UP & DECAY MODEL) ---
         function triggerSoundPlayback() {
             const now = audioContext.currentTime;
             
             if (audioState === 'idle') {
+                // --- Initial Trigger from Silence ---
                 audioState = 'rampingUp';
                 createAudioNodes();
                 masterGainNode.gain.setValueAtTime(0.0001, now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
-
-                const holdTimeout = setTimeout(() => {
+                
+                scheduleTimeout(() => {
                     if (audioState === 'rampingUp') {
-                        audioState = 'holdingBeforeOscillation';
-                        const oscTimeout = setTimeout(() => {
-                            if (audioState === 'holdingBeforeOscillation') {
-                                audioState = 'sustaining';
-                                lfoGain.connect(masterGainNode.gain);
+                        audioState = 'holdingAfterRampUp';
+                        scheduleTimeout(() => {
+                            if (audioState === 'holdingAfterRampUp') {
+                                startDecay();
                             }
                         }, 1000);
-                        allTimeouts.push(oscTimeout);
                     }
                 }, rampPeriod * 1000);
-                allTimeouts.push(holdTimeout);
             }
-            else if (['rampingDown', 'awaitingStopPoint', 'holdingBeforeRampDown'].includes(audioState)) {
+            else if (audioState === 'decaying') {
+                // --- Re-triggering during the decay phase ---
                 audioState = 'holdingAfterInterrupt';
-                masterGainNode.gain.cancelScheduledValues(now);
-                masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
-                if (lfoGain.numberOfOutputs > 0) { try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {} }
+                clearAllTimeouts();
 
-                const holdTimeout = setTimeout(() => {
+                masterGainNode.gain.cancelScheduledValues(now);
+                if (lfoGain.numberOfOutputs > 0) { try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {} }
+                masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
+
+                scheduleTimeout(() => {
                     if (audioState === 'holdingAfterInterrupt') {
                         audioState = 'rampingUp';
                         const rampUpStartTime = audioContext.currentTime;
                         masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
                         
-                        const nextHoldTimeout = setTimeout(() => {
+                        scheduleTimeout(() => {
                             if (audioState === 'rampingUp') {
-                                audioState = 'holdingBeforeOscillation';
-                                const oscTimeout = setTimeout(() => {
-                                    if (audioState === 'holdingBeforeOscillation') {
-                                        audioState = 'sustaining';
-                                        lfoGain.connect(masterGainNode.gain);
+                                audioState = 'holdingAfterRampUp';
+                                scheduleTimeout(() => {
+                                    if (audioState === 'holdingAfterRampUp') {
+                                        startDecay();
                                     }
                                 }, 1000);
-                                allTimeouts.push(oscTimeout);
                             }
                         }, rampPeriod * 1000);
-                        allTimeouts.push(nextHoldTimeout);
                     }
                 }, 1000);
-                allTimeouts.push(holdTimeout);
             }
         }
+        
+        function startDecay() {
+            audioState = 'decaying';
+            const now = audioContext.currentTime;
 
-        function triggerSoundStop() {
-            if (!['sustaining', 'rampingUp', 'holdingBeforeOscillation', 'holdingAfterInterrupt'].includes(audioState)) return;
-            audioState = 'awaitingStopPoint';
+            masterGainNode.gain.setValueAtTime(targetVolume, now);
+            masterGainNode.gain.linearRampToValueAtTime(0.0001, now + decayDuration);
+
+            lfoGain.connect(masterGainNode.gain);
+            lfoGain.gain.linearRampToValueAtTime(0, now + decayDuration);
+            
+            scheduleTimeout(cleanupAudioNodes, (decayDuration + 1) * 1000);
         }
 
         function createAudioNodes() {
@@ -429,7 +402,8 @@
         }
 
         function cleanupAudioNodes() {
-            if (audioState !== 'rampingDown') return;
+            if (!['decaying', 'idle'].includes(audioState) && audioState !== 'idle') return;
+
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
             if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
@@ -440,11 +414,15 @@
         }
         
         // --- SECTION 7: HELPER FUNCTIONS ---
+        function scheduleTimeout(callback, delay) {
+            const id = setTimeout(callback, delay);
+            allTimeouts.push(id);
+            return id;
+        }
+
         function clearAllTimeouts() {
             allTimeouts.forEach(clearTimeout);
             allTimeouts = [];
-            if(stopSoundTimer) clearTimeout(stopSoundTimer);
-            stopSoundTimer = null;
         }
 
         function calculateLogVolume(dataArray) {
