@@ -70,19 +70,11 @@
             bottom: 50%; /* Fixed position for the 50% disturbance trigger */
             transition: bottom 0.2s ease;
         }
-        /* New version number style */
-        #versionNumber {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-            font-size: 0.7em;
-            color: #555;
-        }
     </style>
 </head>
 <body>
     <div id="startScreen">
-        <button id="startButton">Start Monitoring</button>
+        <button id="startButton">Start Monitoring (v1.7)</button>
     </div>
 
     <div id="mainContent">
@@ -92,14 +84,13 @@
         </div>
         <div id="shushMessage">Shusssshhhhh</div>
     </div>
-
-    <div id="versionNumber">v1.6</div>
     
     <script>
         // --- CONFIGURATION & STATE VARIABLES ---
         let volumeThreshold = 50; // The raw sound level that is considered a "breach" (0-100)
         let breachRecords = [];   // Stores recent sound breaches { timestamp, magnitude }
-        let isShushing = false;   // Flag to prevent the "shush" message from re-triggering while visible
+        let disturbanceHistory = []; // Stores recent disturbance levels { timestamp, level }
+        let isShushing = false;   // Flag for the visual "shush" message timer
         
         const MAX_DISTURBANCE_SCORE = 5000; 
         
@@ -107,6 +98,7 @@
         let audioContext;
         let whiteNoiseNode = null;
         let lfoNode = null; // To hold the Low Frequency Oscillator
+        let masterGainNode = null; // To control overall volume of white noise
 
         // --- COMMUNICATION WITH THUNKABLE ---
         window.addEventListener('message', function(event) {
@@ -152,17 +144,23 @@
                     }
 
                     const disturbanceLevel = calculateDisturbanceLevel();
+                    const now = Date.now();
+                    disturbanceHistory.push({ timestamp: now, level: disturbanceLevel });
+                    disturbanceHistory = disturbanceHistory.filter(record => record.timestamp > now - 5000);
+                    
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
+                    // Handle audio separately from the visual message
+                    if (disturbanceLevel > 50) {
+                        manageWhiteNoise();
+                    }
+
+                    // Handle the visual "Shush" message with its own timer
                     if (disturbanceLevel > 50 && !isShushing) {
                         isShushing = true; 
-                        const shushElement = document.getElementById('shushMessage');
-                        shushElement.style.display = 'block';
-
-                        playWhiteNoise(disturbanceLevel);
-                        
+                        document.getElementById('shushMessage').style.display = 'block';
                         setTimeout(() => {
-                            shushElement.style.display = 'none';
+                            document.getElementById('shushMessage').style.display = 'none';
                             isShushing = false;
                         }, 10000);
                     }
@@ -177,66 +175,78 @@
             }
         }
 
-        // --- WHITE NOISE PLAYER FUNCTION ---
-        function playWhiteNoise(triggeredLevel) {
-            if (whiteNoiseNode) whiteNoiseNode.stop();
-            if (lfoNode) lfoNode.stop();
+        // --- WHITE NOISE MANAGEMENT ---
+        function manageWhiteNoise() {
+            const avgDisturbance = calculateAverageDisturbance();
+            const clampedAvg = Math.max(50, avgDisturbance); // Ensure we don't get negative volumes
+            const peakVolume = ((clampedAvg - 50) / 50) * 0.4 + 0.1;
 
-            // Main gain node for overall volume control
-            const gainNode = audioContext.createGain();
-            gainNode.connect(audioContext.destination);
+            // If noise isn't playing yet, start it up.
+            if (!whiteNoiseNode) {
+                // Main gain node for overall volume control
+                masterGainNode = audioContext.createGain();
+                masterGainNode.connect(audioContext.destination);
 
-            // Create and configure the white noise source
-            const bufferSize = 2 * audioContext.sampleRate;
-            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
-            const output = noiseBuffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                output[i] = Math.random() * 2 - 1;
+                // Create and configure the white noise source
+                const bufferSize = 2 * audioContext.sampleRate;
+                const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) { output[i] = Math.random() * 2 - 1; }
+                whiteNoiseNode = audioContext.createBufferSource();
+                whiteNoiseNode.buffer = noiseBuffer;
+                whiteNoiseNode.loop = true;
+                whiteNoiseNode.connect(masterGainNode);
+
+                // LFO (Low Frequency Oscillator) for volume modulation
+                lfoNode = audioContext.createOscillator();
+                lfoNode.type = 'sine';
+                lfoNode.frequency.setValueAtTime(0.2, audioContext.currentTime); // 5-second period
+                const lfoGain = audioContext.createGain();
+                lfoGain.gain.setValueAtTime(0.04, audioContext.currentTime); // Wave depth
+                lfoNode.connect(lfoGain);
+                lfoGain.connect(masterGainNode.gain);
+
+                // Initial ramp-up
+                const now = audioContext.currentTime;
+                masterGainNode.gain.setValueAtTime(0.0001, now);
+                // Increased timeConstant to 3.0 for a very slow start
+                masterGainNode.gain.setTargetAtTime(peakVolume, now, 3.0); 
+
+                whiteNoiseNode.start(now);
+                lfoNode.start(now);
+
+                // Set a timer to stop the noise after 30 seconds
+                setTimeout(stopWhiteNoise, 30000);
+
+            } else {
+                // If noise is already playing, just adjust the volume smoothly
+                masterGainNode.gain.setTargetAtTime(peakVolume, audioContext.currentTime, 1.5);
             }
-            whiteNoiseNode = audioContext.createBufferSource();
-            whiteNoiseNode.buffer = noiseBuffer;
-            whiteNoiseNode.loop = true;
-            whiteNoiseNode.connect(gainNode);
-
-            // --- LFO (Low Frequency Oscillator) for volume modulation ---
-            // Create an oscillator to control the volume wave
-            lfoNode = audioContext.createOscillator();
-            lfoNode.type = 'sine';
-            // A 5-second period means a frequency of 1/5 = 0.2 Hz
-            lfoNode.frequency.setValueAtTime(0.2, audioContext.currentTime);
-
-            // Create a gain node for the LFO to control the *depth* of the wave
-            const lfoGain = audioContext.createGain();
-            // This value controls how much the volume fluctuates. 0.04 means +/- 4% of the peak volume.
-            lfoGain.gain.setValueAtTime(0.04, audioContext.currentTime);
-
-            // Connect the LFO signal through its gain node to the main gain parameter
-            lfoNode.connect(lfoGain);
-            lfoGain.connect(gainNode.gain);
-
-            // --- DYNAMIC VOLUME RAMPING ---
-            const now = audioContext.currentTime;
-            const peakVolume = ((triggeredLevel - 50) / 50) * 0.4 + 0.1;
-            
-            // Start silent
-            gainNode.gain.setValueAtTime(0.0001, now);
-
-            // The timeConstant is increased to 1.5 for a slower, more noticeable ramp-up
-            gainNode.gain.setTargetAtTime(peakVolume, now, 1.5);
-
-            // Schedule the fade-out to start after 30 seconds
-            gainNode.gain.setTargetAtTime(0.0001, now + 30, 1.5);
-
-            // Start both the noise and the volume wave
-            whiteNoiseNode.start(now);
-            lfoNode.start(now);
-
-            // Schedule them to stop after the fade-out is complete
-            whiteNoiseNode.stop(now + 30 + 5);
-            lfoNode.stop(now + 30 + 5);
         }
 
-        // --- DISTURBANCE CALCULATION FUNCTION ---
+        function stopWhiteNoise() {
+            if (!masterGainNode) return; // Already stopped
+            
+            const now = audioContext.currentTime;
+            masterGainNode.gain.setTargetAtTime(0.0001, now, 1.5);
+
+            const stopTime = now + 5;
+            whiteNoiseNode.stop(stopTime);
+            lfoNode.stop(stopTime);
+            
+            // Clear variables after stopping
+            whiteNoiseNode = null;
+            lfoNode = null;
+            masterGainNode = null;
+        }
+
+        // --- CALCULATION FUNCTIONS ---
+        function calculateAverageDisturbance() {
+            if (disturbanceHistory.length === 0) return 0;
+            const sum = disturbanceHistory.reduce((acc, record) => acc + record.level, 0);
+            return sum / disturbanceHistory.length;
+        }
+
         function calculateDisturbanceLevel() {
             const now = Date.now();
             const tenSecondsAgo = now - 10000;
@@ -257,6 +267,5 @@
     </script>
 </body>
 </html>
-
 
 
