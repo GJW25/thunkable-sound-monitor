@@ -93,6 +93,10 @@
         // This constant helps normalize the disturbance score to a 0-100 scale.
         // Increased to make the algorithm less sensitive.
         const MAX_DISTURBANCE_SCORE = 5000; 
+        
+        // --- NEW: WHITE NOISE VARIABLES ---
+        let audioContext; // Will be initialized after user interaction
+        let whiteNoiseNode = null; // To hold the white noise source
 
         // --- COMMUNICATION WITH THUNKABLE ---
         // Listens for messages from the Thunkable app to change the raw sound threshold
@@ -113,11 +117,13 @@
             document.getElementById('mainContent').style.display = 'block';
 
             try {
+                // Initialize the main AudioContext for all audio operations
+                audioContext = new AudioContext();
+
                 // Request access to the user's microphone
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 
                 // Set up the Web Audio API components for analysis
-                const audioContext = new AudioContext();
                 const mediaStreamSource = audioContext.createMediaStreamSource(stream);
                 const analyser = audioContext.createAnalyser();
                 analyser.fftSize = 256; // Determines the detail of the sound analysis
@@ -128,55 +134,95 @@
                 // --- MAIN LOOP ---
                 // This function runs continuously to check the sound level
                 function checkSoundLevel() {
-                    // Get the current sound frequency data from the analyser
                     analyser.getByteFrequencyData(dataArray);
                     
-                    // Calculate the average volume from the frequency data
                     let sum = 0;
                     for (const amplitude of dataArray) { sum += amplitude * amplitude; }
                     const rawVolume = Math.sqrt(sum / dataArray.length);
                     
-                    // Convert raw volume to a more natural-feeling logarithmic scale (0-100)
                     const scaledVolume = Math.min(100, Math.round(18 * Math.log(rawVolume + 1)));
                     
-                    // Check if the current volume exceeds the set threshold for what counts as a "breach"
                     if (scaledVolume > volumeThreshold) {
                         breachRecords.push({
                             timestamp: Date.now(),
-                            magnitude: scaledVolume - volumeThreshold // How much it went over
+                            magnitude: scaledVolume - volumeThreshold
                         });
                     }
 
-                    // Calculate the "Disturbance Level" based on recent breaches
                     const disturbanceLevel = calculateDisturbanceLevel();
                     
-                    // --- VISUAL UPDATE ---
-                    // The main bar now tracks the calculated disturbance level, not the live sound
                     document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
 
-                    // Trigger the "shush" message if disturbance is high and it's not already showing
+                    // Trigger the "shush" message and white noise if disturbance is high
                     if (disturbanceLevel > 50 && !isShushing) {
-                        isShushing = true; // Set flag to prevent re-triggering
+                        isShushing = true; 
                         const shushElement = document.getElementById('shushMessage');
                         shushElement.style.display = 'block';
+
+                        // --- NEW: Play White Noise ---
+                        playWhiteNoise();
                         
-                        // After 10 seconds, hide the message and allow it to be triggered again
                         setTimeout(() => {
                             shushElement.style.display = 'none';
                             isShushing = false;
-                        }, 10000);
+                        }, 10000); // Shush message disappears after 10s
                     }
                     
-                    // Request the next animation frame to continue the loop smoothly
                     requestAnimationFrame(checkSoundLevel);
                 }
-                checkSoundLevel(); // Start the loop
+                checkSoundLevel();
             
             } catch (err) {
-                // Handle errors, like the user denying microphone permission
                 document.getElementById('mainContent').innerHTML = `<p style="color:red;">Error: ${err.message}. Please allow microphone access.</p>`;
                 console.error('Error:', err);
             }
+        }
+
+        // --- NEW: WHITE NOISE PLAYER FUNCTION ---
+        function playWhiteNoise() {
+            // Stop any existing white noise before starting a new one
+            if (whiteNoiseNode) {
+                whiteNoiseNode.stop();
+            }
+
+            // Create a GainNode to control the volume of the white noise
+            const gainNode = audioContext.createGain();
+            gainNode.connect(audioContext.destination);
+
+            // Create a buffer for the white noise (2 seconds of audio)
+            const bufferSize = 2 * audioContext.sampleRate;
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+
+            // Fill the buffer with random values to create the noise
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+
+            // Create a source node, set its buffer to our noise, and make it loop
+            whiteNoiseNode = audioContext.createBufferSource();
+            whiteNoiseNode.buffer = noiseBuffer;
+            whiteNoiseNode.loop = true;
+            whiteNoiseNode.connect(gainNode);
+
+            // --- VOLUME RAMPING ---
+            const now = audioContext.currentTime;
+            
+            // 1. Start at a very low volume (effectively silent)
+            gainNode.gain.setValueAtTime(0.0001, now);
+
+            // 2. Ramp up to 50% volume over 2 seconds
+            gainNode.gain.linearRampToValueAtTime(0.5, now + 2);
+
+            // 3. Schedule the fade-out to start after 30 seconds
+            // It will ramp down from 50% to silent over 3 seconds
+            gainNode.gain.linearRampToValueAtTime(0.0001, now + 30 + 3);
+
+            // Start playing the noise
+            whiteNoiseNode.start(now);
+
+            // Schedule the node to stop completely after the fade-out is finished
+            whiteNoiseNode.stop(now + 30 + 3.1);
         }
 
         // --- DISTURBANCE CALCULATION FUNCTION ---
@@ -184,34 +230,23 @@
             const now = Date.now();
             const tenSecondsAgo = now - 10000;
 
-            // 1. Filter out any breach records that are older than 10 seconds
             breachRecords = breachRecords.filter(record => record.timestamp > tenSecondsAgo);
 
-            if (breachRecords.length === 0) {
-                return 0; // If no recent breaches, disturbance is 0
-            }
+            if (breachRecords.length === 0) { return 0; }
 
-            // 2. Calculate a total "disturbance score"
             let totalScore = 0;
             for (const record of breachRecords) {
                 const recencyWeight = (record.timestamp - tenSecondsAgo) / 10000;
                 totalScore += record.magnitude * recencyWeight;
             }
 
-            // 3. Normalize the raw score to a 0-100 scale using a non-linear (log-like) curve.
             const scoreAsPercentage = Math.min(1.0, totalScore / MAX_DISTURBANCE_SCORE);
-
-            // The exponent in this power curve was increased from 1.5 to 2.0 to make the
-            // disturbance level grow more slowly at lower levels, making it less sensitive.
             const curvedScore = Math.pow(scoreAsPercentage, 2.0);
-
-            // Finally, convert this curved percentage back to a 0-100 scale.
             const normalizedLevel = Math.round(curvedScore * 100);
             return normalizedLevel;
         }
 
         // --- EVENT LISTENER ---
-        // Attaches the startMonitoring function to the "Start" button's click event
         document.getElementById('startButton').addEventListener('click', startMonitoring);
     </script>
 </body>
