@@ -42,13 +42,23 @@
             color: white;
             margin-bottom: 20px;
         }
+        /* New layout for visualizer and text */
+        #displayArea {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            margin: 10px auto;
+        }
+        #statusTextContainer {
+            text-align: left;
+        }
         #visualizerContainer {
             width: 80px;
             height: 150px;
             background-color: #333;
             border: 2px solid #555;
             border-radius: 8px;
-            margin: 10px auto;
             position: relative;
             overflow: hidden;
         }
@@ -79,14 +89,18 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.2)</button>
+        <button id="startButton">Start Monitoring (v3.3)</button>
         <div id="mainContent" style="width: 100%;">
-             <div class="status-display">Detected Sound: <span id="soundLevelValue">0</span></div>
-             <div class="status-display">Replay Volume: <span id="replayVolumeValue">0</span></div>
-             <div class="status-display">Time Remaining: <span id="timeRemainingValue">-</span></div>
-            <div id="visualizerContainer">
-                <div id="soundBar"></div>
-                <div id="triggerLine"></div>
+            <div id="displayArea">
+                <div id="visualizerContainer">
+                    <div id="soundBar"></div>
+                    <div id="triggerLine"></div>
+                </div>
+                <div id="statusTextContainer">
+                    <div class="status-display">Detected Sound: <span id="soundLevelValue">0</span></div>
+                    <div class="status-display">Replay Volume: <span id="replayVolumeValue">0</span></div>
+                    <div class="status-display" id="activationStatus">-</div>
+                </div>
             </div>
             <div class="controls">
                 <div class="control-group">
@@ -142,7 +156,7 @@
         const triggerLine = document.getElementById('triggerLine');
         const soundLevelValue = document.getElementById('soundLevelValue');
         const replayVolumeValue = document.getElementById('replayVolumeValue');
-        const timeRemainingValue = document.getElementById('timeRemainingValue');
+        const activationStatus = document.getElementById('activationStatus');
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
@@ -187,7 +201,12 @@
             const newVolume = parseInt(e.target.value);
             targetVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
-            if (lfoGain) {
+            // Real-time update for master volume and LFO
+            if (masterGainNode && audioContext) {
+                // Smoothly transition to the new target volume, effective during ramps and decays
+                masterGainNode.gain.setTargetAtTime(targetVolume, audioContext.currentTime, 0.1);
+            }
+            if (lfoGain && audioContext) {
                 lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
             }
         });
@@ -238,7 +257,6 @@
 
             try {
                 audioContext = new AudioContext();
-                // Request mic with echo cancellation to prevent feedback loop
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { 
                         echoCancellation: true,
@@ -274,12 +292,14 @@
                         replayVolumeValue.textContent = 0;
                     }
                     
-                    // Update countdown timer
+                    // Update status indicator based on audio state
                     if (audioState === 'decaying' && decayEndTime) {
                         const remaining = Math.max(0, (decayEndTime - Date.now()) / 1000);
-                        timeRemainingValue.textContent = `${remaining.toFixed(1)}s`;
+                        activationStatus.textContent = `Time Remaining: ${remaining.toFixed(1)}s`;
+                    } else if (audioState !== 'idle' && audioState !== 'decaying') {
+                        activationStatus.textContent = 'Activated';
                     } else {
-                        timeRemainingValue.textContent = '-';
+                        activationStatus.textContent = '-';
                     }
 
                     if (disturbanceLevel > disturbanceTriggerLevel) {
@@ -304,7 +324,6 @@
             cancelAnimationFrame(animationFrameId);
             clearAllTimeouts();
             
-            // Immediate sound stop logic
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
             if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
@@ -323,7 +342,7 @@
             streamSource = null;
             decayEndTime = null;
             
-            startButton.textContent = `Start Monitoring (v3.2)`;
+            startButton.textContent = `Start Monitoring (v3.3)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -473,7 +492,6 @@
     </script>
 </body>
 </html>
-
 
 
 
