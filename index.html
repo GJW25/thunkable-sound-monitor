@@ -217,11 +217,13 @@
     <div id="mainContainer">
         <button id="startButton">Start Monitoring (v4.1)</button>
         <div id="mainContent" style="width: 100%;">
-            <h2>
-                Noise Disturbance 
-                <span class="info-icon" data-tooltip-id="tooltip-disturbance">?</span>
-            </h2>
-            <div class="tooltip" id="tooltip-disturbance">Disturbance is a combination of the volume and duration of recent sounds that exceed the sensitivity threshold.</div>
+            <div style="position: relative;">
+                <h2>
+                    Noise Disturbance 
+                    <span class="info-icon" data-tooltip-id="tooltip-disturbance">?</span>
+                </h2>
+                <div class="tooltip" id="tooltip-disturbance">Disturbance is a combination of the volume and duration of recent sounds that exceed the sensitivity threshold.</div>
+            </div>
 
             <div id="displayArea">
                 <div id="visualizerContainer">
@@ -243,7 +245,7 @@
                     <div class="tooltip" id="tooltip-trigger">Sets the disturbance level (red line) required to activate sound. A lower value is more sensitive.</div>
                 </div>
                 <div class="control-group">
-                    <label for="sensitivitySlider">Sensitivity: <span id="sensitivityValue">50</span></label>
+                    <label for="sensitivitySlider">Sensitivity: <span id="sensitivityValue">50</span>%</label>
                     <div class="slider-container">
                         <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
                         <span class="info-icon" data-tooltip-id="tooltip-sensitivity">?</span>
@@ -337,7 +339,7 @@
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
-        let sensitivityThreshold = 60; // Initial value before slider is moved
+        let sensitivityThreshold = 50; // Initial value before slider is moved
         let targetVolume = 0.5;
         let decayDuration = 30;
         let rampPeriod = 10;
@@ -423,8 +425,7 @@
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
-            const sliderValue = parseInt(e.target.value); // 1-100
-            // Map slider 1-100 to a threshold of 60-40. Higher slider value = lower threshold (more sensitive).
+            const sliderValue = parseInt(e.target.value);
             sensitivityThreshold = 60 - ((sliderValue - 1) * (20 / 99));
             sensitivityValueSpan.textContent = sliderValue;
         });
@@ -571,13 +572,16 @@
                 clearAllTimeouts();
 
                 masterGainNode.gain.cancelScheduledValues(now);
-                if (lfoGain.numberOfOutputs > 0) { try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {} }
+                // Oscillation is already happening, so we just need to stop the decay.
+                // We keep the LFO connected.
                 masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
 
                 scheduleTimeout(() => {
                     if (audioState === 'holdingAfterInterrupt') {
                         audioState = 'rampingUp';
                         const rampUpStartTime = audioContext.currentTime;
+                        // Re-engage oscillation gain to full strength
+                        lfoGain.gain.linearRampToValueAtTime(targetVolume * oscillationDepth, rampUpStartTime + rampPeriod);
                         masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
                         
                         scheduleTimeout(() => {
@@ -600,10 +604,14 @@
             decayEndTime = Date.now() + decayDuration * 1000;
             const now = audioContext.currentTime;
 
+            // Ensure oscillation is running before starting decay
+            if (lfoGain.numberOfOutputs === 0) {
+                 lfoGain.connect(masterGainNode.gain);
+            }
+            
             masterGainNode.gain.setValueAtTime(targetVolume, now);
             masterGainNode.gain.linearRampToValueAtTime(0.0001, now + decayDuration);
 
-            lfoGain.connect(masterGainNode.gain);
             lfoGain.gain.linearRampToValueAtTime(0, now + decayDuration);
             
             scheduleTimeout(cleanupAudioNodes, (decayDuration + 1) * 1000);
@@ -702,5 +710,6 @@
     </script>
 </body>
 </html>
+
 
 
