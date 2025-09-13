@@ -67,9 +67,9 @@
             left: 0;
             width: 100%;
             height: 3px;
-            background-color: #C62828; /* Changed to red */
+            background-color: #00796B; /* Default to green */
             bottom: 50%;
-            transition: bottom 0.2s ease;
+            transition: all 0.2s ease;
         }
         .controls { margin-top: 15px; width: 90%; max-width: 300px; }
         .control-group { margin-bottom: 10px; text-align: left; position: relative; }
@@ -168,8 +168,9 @@
             margin-left: -100px;
             opacity: 0;
             transition: opacity 0.3s;
+            pointer-events: none; /* Add this */
         }
-        .control-group:hover .tooltip {
+        .tooltip.show { /* Driven by JS now */
             visibility: visible;
             opacity: 1;
         }
@@ -182,7 +183,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.7)</button>
+        <button id="startButton">Start Monitoring (v3.8)</button>
         <div id="mainContent" style="width: 100%;">
             <h2>
                 Noise Disturbance 
@@ -304,7 +305,7 @@
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
-        let soundSensitivity = 0.5; // Recalibrated
+        let soundSensitivity = 0.5;
         let targetVolume = 0.5;
         let decayDuration = 30;
         let rampPeriod = 4;
@@ -352,7 +353,6 @@
         document.querySelectorAll('.info-icon').forEach(icon => {
             const tooltipId = icon.getAttribute('data-tooltip-id');
             const tooltip = document.getElementById(tooltipId);
-            const controlGroup = icon.closest('.control-group') || icon.closest('h2');
             
             icon.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -461,7 +461,8 @@
         function startPlaybackAndMonitoring() {
             isMonitoring = true;
             startButton.textContent = 'Stop Monitoring';
-            startButton.style.backgroundColor = '#C62828';
+            startButton.style.backgroundColor = '#C62828'; // Red
+            triggerLine.style.backgroundColor = '#C62828'; // Red
             resetInactivityTimer();
         }
 
@@ -477,8 +478,9 @@
             
             breachRecords = [];
             decayEndTime = null;
-            startButton.textContent = `Start Monitoring (v3.7)`;
-            startButton.style.backgroundColor = '#00796B';
+            startButton.textContent = `Start Monitoring (v3.8)`;
+            startButton.style.backgroundColor = '#00796B'; // Green
+            triggerLine.style.backgroundColor = '#00796B'; // Green
         }
 
         function mainLoop() {
@@ -671,6 +673,5 @@
     </script>
 </body>
 </html>
-
 
 
