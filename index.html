@@ -94,7 +94,7 @@
         // Increased to make the algorithm less sensitive.
         const MAX_DISTURBANCE_SCORE = 5000; 
         
-        // --- NEW: WHITE NOISE VARIABLES ---
+        // --- WHITE NOISE VARIABLES ---
         let audioContext; // Will be initialized after user interaction
         let whiteNoiseNode = null; // To hold the white noise source
 
@@ -159,8 +159,8 @@
                         const shushElement = document.getElementById('shushMessage');
                         shushElement.style.display = 'block';
 
-                        // --- NEW: Play White Noise ---
-                        playWhiteNoise();
+                        // --- Play White Noise with proportional volume ---
+                        playWhiteNoise(disturbanceLevel);
                         
                         setTimeout(() => {
                             shushElement.style.display = 'none';
@@ -178,51 +178,51 @@
             }
         }
 
-        // --- NEW: WHITE NOISE PLAYER FUNCTION ---
-        function playWhiteNoise() {
-            // Stop any existing white noise before starting a new one
+        // --- WHITE NOISE PLAYER FUNCTION ---
+        function playWhiteNoise(triggeredLevel) {
             if (whiteNoiseNode) {
                 whiteNoiseNode.stop();
             }
 
-            // Create a GainNode to control the volume of the white noise
             const gainNode = audioContext.createGain();
             gainNode.connect(audioContext.destination);
 
-            // Create a buffer for the white noise (2 seconds of audio)
             const bufferSize = 2 * audioContext.sampleRate;
             const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
             const output = noiseBuffer.getChannelData(0);
-
-            // Fill the buffer with random values to create the noise
             for (let i = 0; i < bufferSize; i++) {
                 output[i] = Math.random() * 2 - 1;
             }
 
-            // Create a source node, set its buffer to our noise, and make it loop
             whiteNoiseNode = audioContext.createBufferSource();
             whiteNoiseNode.buffer = noiseBuffer;
             whiteNoiseNode.loop = true;
             whiteNoiseNode.connect(gainNode);
 
-            // --- VOLUME RAMPING ---
+            // --- DYNAMIC VOLUME RAMPING ---
             const now = audioContext.currentTime;
             
-            // 1. Start at a very low volume (effectively silent)
+            // 1. Calculate the peak volume based on the disturbance level (51-100).
+            // This maps the disturbance range to a volume range of 0.1 to 0.5.
+            const peakVolume = ((triggeredLevel - 50) / 50) * 0.4 + 0.1;
+
+            // 2. Start at a very low volume (effectively silent).
             gainNode.gain.setValueAtTime(0.0001, now);
 
-            // 2. Ramp up to 50% volume over 2 seconds
-            gainNode.gain.linearRampToValueAtTime(0.5, now + 2);
+            // 3. Use setTargetAtTime for a smooth, exponential ramp-up.
+            // It will gradually approach the peakVolume. The third parameter (timeConstant)
+            // controls how quickly it ramps up. A larger value means a slower ramp.
+            gainNode.gain.setTargetAtTime(peakVolume, now, 0.8);
 
-            // 3. Schedule the fade-out to start after 30 seconds
-            // It will ramp down from 50% to silent over 3 seconds
-            gainNode.gain.linearRampToValueAtTime(0.0001, now + 30 + 3);
+            // 4. Schedule the fade-out to start after 30 seconds.
+            // The ramp-down is also exponential for a gentle tapering effect.
+            gainNode.gain.setTargetAtTime(0.0001, now + 30, 1.5);
 
             // Start playing the noise
             whiteNoiseNode.start(now);
 
             // Schedule the node to stop completely after the fade-out is finished
-            whiteNoiseNode.stop(now + 30 + 3.1);
+            whiteNoiseNode.stop(now + 30 + 5); // Allow 5s for the fade out
         }
 
         // --- DISTURBANCE CALCULATION FUNCTION ---
@@ -251,4 +251,5 @@
     </script>
 </body>
 </html>
+
 
