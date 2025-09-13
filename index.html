@@ -16,8 +16,8 @@
             display: flex;
             justify-content: center;
             align-items: flex-start;
-            height: 100%;
             width: 100%;
+            min-height: 100%;
             overflow-y: auto;
             margin: 0;
             padding: 20px 10px;
@@ -82,6 +82,38 @@
         .control-group input[type="range"] { 
             flex-grow: 1;
             width: 100%; 
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        .control-group input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #00796B;
+            cursor: pointer;
+            margin-top: -6px;
+        }
+        .control-group input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #555;
+            border-radius: 2px;
+        }
+        .control-group input[type=range]::-moz-range-thumb {
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #00796B;
+            cursor: pointer;
+        }
+        .control-group input[type=range]::-moz-range-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #555;
+            border-radius: 2px;
         }
         .status-display { margin-bottom: 5px; }
         
@@ -162,7 +194,7 @@
             border-radius: 6px;
             padding: 5px;
             position: absolute;
-            z-index: 1;
+            z-index: 10;
             bottom: 125%;
             left: 50%;
             margin-left: -100px;
@@ -183,7 +215,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.9)</button>
+        <button id="startButton">Start Monitoring (v4.0)</button>
         <div id="mainContent" style="width: 100%;">
             <h2>
                 Noise Disturbance 
@@ -219,7 +251,7 @@
                     <div class="tooltip" id="tooltip-sensitivity">Adjusts microphone sensitivity. Higher values make it easier for quieter sounds to register as a disturbance.</div>
                 </div>
                 <div class="control-group">
-                    <label for="volumeSlider">Target Volume: <span id="volumeValue">50%</span></label>
+                    <label for="volumeSlider">Volume: <span id="volumeValue">50%</span></label>
                     <div class="slider-container">
                         <input type="range" id="volumeSlider" min="0" max="100" value="50">
                         <span class="info-icon" data-tooltip-id="tooltip-volume">?</span>
@@ -468,15 +500,7 @@
 
         function stopPlaybackAndMonitoring() {
             isMonitoring = false;
-            // --- FIX: IMMEDIATE SOUND STOP ---
-            clearAllTimeouts();
-            if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
-            if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
-            if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
-            if (masterGainNode) { try { masterGainNode.disconnect(); } catch (e) {} }
-            whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
-            audioState = 'idle';
-            // --- END FIX ---
+            cleanupAudioNodes(); // Use the safe cleanup function
             if (inactivityTimer) {
                 clearTimeout(inactivityTimer);
                 inactivityTimer = null;
@@ -485,7 +509,7 @@
             
             breachRecords = [];
             decayEndTime = null;
-            startButton.textContent = `Start Monitoring (v3.9)`;
+            startButton.textContent = `Start Monitoring (v4.0)`;
             startButton.style.backgroundColor = '#00796B'; // Green
             triggerLine.style.backgroundColor = '#00796B'; // Green
         }
@@ -609,14 +633,12 @@
         }
 
         function cleanupAudioNodes() {
-            if (!['decaying', 'idle'].includes(audioState) && audioState !== 'idle') return;
+            clearAllTimeouts(); // Clear any pending state changes
             decayEndTime = null;
-
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
             if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
             if (masterGainNode) { try { masterGainNode.disconnect(); } catch (e) {} }
-            
             whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
             audioState = 'idle';
         }
@@ -680,4 +702,5 @@
     </script>
 </body>
 </html>
+
 
