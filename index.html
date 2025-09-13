@@ -42,7 +42,6 @@
             color: white;
             margin-bottom: 20px;
         }
-        /* New layout for visualizer and text */
         #displayArea {
             display: flex;
             justify-content: center;
@@ -52,6 +51,7 @@
         }
         #statusTextContainer {
             text-align: left;
+            min-width: 160px; /* Lock width to prevent layout shifts */
         }
         #visualizerContainer {
             width: 80px;
@@ -85,11 +85,36 @@
         .control-group label { display: block; margin-bottom: 5px; font-size: 0.9em; }
         .control-group input[type="range"] { width: 100%; }
         .status-display { margin-bottom: 5px; }
+        
+        /* New Screensaver Styles */
+        #screensaver {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            z-index: 100;
+            display: none; /* Hidden by default */
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        #returnButton {
+            padding: 15px 30px;
+            font-size: 1.2em;
+            cursor: pointer;
+            border-radius: 8px;
+            border: 1px solid #555;
+            background-color: #333;
+            color: #ccc;
+        }
     </style>
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v3.3)</button>
+        <button id="startButton">Start Monitoring (v3.4)</button>
         <div id="mainContent" style="width: 100%;">
             <div id="displayArea">
                 <div id="visualizerContainer">
@@ -135,6 +160,9 @@
             <div id="shushMessage">Shusssshhhhh</div>
         </div>
     </div>
+    <div id="screensaver">
+        <button id="returnButton">Return</button>
+    </div>
     
     <script>
         // --- SECTION 1: DOM ELEMENT REFERENCES ---
@@ -157,6 +185,8 @@
         const soundLevelValue = document.getElementById('soundLevelValue');
         const replayVolumeValue = document.getElementById('replayVolumeValue');
         const activationStatus = document.getElementById('activationStatus');
+        const screensaver = document.getElementById('screensaver');
+        const returnButton = document.getElementById('returnButton');
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         let disturbanceTriggerLevel = 50;
@@ -172,6 +202,7 @@
         let isShushing = false;
         let allTimeouts = [];
         let decayEndTime = null;
+        let inactivityTimer = null;
         
         // --- SECTION 3: AUDIO API & STATE VARIABLES ---
         let audioContext;
@@ -184,11 +215,19 @@
 
         // --- SECTION 4: EVENT LISTENERS ---
         startButton.addEventListener('click', () => {
+            resetInactivityTimer();
             if (isMonitoring) {
                 stopMonitoring();
             } else {
                 startMonitoring();
             }
+        });
+
+        returnButton.addEventListener('click', resetInactivityTimer);
+
+        // Add inactivity timer reset to all sliders
+        [triggerSlider, volumeSlider, sensitivitySlider, durationSlider, rampSlider, oscillationSlider, oscillationDepthSlider].forEach(slider => {
+            slider.addEventListener('input', resetInactivityTimer);
         });
 
         triggerSlider.addEventListener('input', (e) => {
@@ -201,9 +240,7 @@
             const newVolume = parseInt(e.target.value);
             targetVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
-            // Real-time update for master volume and LFO
             if (masterGainNode && audioContext) {
-                // Smoothly transition to the new target volume, effective during ramps and decays
                 masterGainNode.gain.setTargetAtTime(targetVolume, audioContext.currentTime, 0.1);
             }
             if (lfoGain && audioContext) {
@@ -292,7 +329,6 @@
                         replayVolumeValue.textContent = 0;
                     }
                     
-                    // Update status indicator based on audio state
                     if (audioState === 'decaying' && decayEndTime) {
                         const remaining = Math.max(0, (decayEndTime - Date.now()) / 1000);
                         activationStatus.textContent = `Time Remaining: ${remaining.toFixed(1)}s`;
@@ -323,6 +359,7 @@
 
             cancelAnimationFrame(animationFrameId);
             clearAllTimeouts();
+            if (inactivityTimer) clearTimeout(inactivityTimer);
             
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
@@ -342,7 +379,7 @@
             streamSource = null;
             decayEndTime = null;
             
-            startButton.textContent = `Start Monitoring (v3.3)`;
+            startButton.textContent = `Start Monitoring (v3.4)`;
             startButton.style.backgroundColor = '#00796B';
         }
 
@@ -447,7 +484,23 @@
             audioState = 'idle';
         }
         
-        // --- SECTION 7: HELPER FUNCTIONS ---
+        // --- SECTION 7: HELPER & INACTIVITY FUNCTIONS ---
+        function resetInactivityTimer() {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            hideScreensaver();
+            inactivityTimer = setTimeout(showScreensaver, 10000); // 10 seconds
+        }
+
+        function showScreensaver() {
+            screensaver.style.display = 'flex';
+            setTimeout(() => screensaver.style.opacity = '1', 10); // Fade in
+        }
+
+        function hideScreensaver() {
+            screensaver.style.opacity = '0';
+            setTimeout(() => screensaver.style.display = 'none', 500); // Hide after fade out
+        }
+
         function scheduleTimeout(callback, delay) {
             const id = setTimeout(callback, delay);
             allTimeouts.push(id);
