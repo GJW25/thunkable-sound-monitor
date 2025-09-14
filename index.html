@@ -244,7 +244,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v4.6)</button>
+        <button id="startButton">Start Monitoring (v4.7)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
@@ -583,14 +583,13 @@
                     }
                 }, rampPeriod * 1000);
             }
-            else if (['decaying', 'rampingUp'].includes(audioState)) {
+            else if (['decaying', 'rampingUp', 'holding'].includes(audioState)) {
                 audioState = 'interruptRamp';
                 clearAllTimeouts();
 
                 masterGainNode.gain.cancelScheduledValues(now);
                 lfoGain.gain.cancelScheduledValues(now);
                 
-                // If LFO was connected, disconnect it for a stable ramp-up
                 if (lfoGain.numberOfOutputs > 0) lfoGain.disconnect(masterGainNode.gain);
 
                 masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
@@ -619,7 +618,6 @@
             decayEndTime = Date.now() + decayDuration * 1000;
             const now = audioContext.currentTime;
             
-            // Connect LFO for oscillation during decay
             lfoGain.connect(masterGainNode.gain);
             
             masterGainNode.gain.setValueAtTime(targetVolume, now);
@@ -660,8 +658,8 @@
             decayEndTime = null;
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
             if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
-            if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
             if (masterGainNode) { try { masterGainNode.disconnect(); } catch (e) {} }
+            if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
             whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
             audioState = 'idle';
         }
