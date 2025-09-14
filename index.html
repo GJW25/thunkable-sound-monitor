@@ -244,7 +244,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v4.8)</button>
+        <button id="startButton">Start Monitoring (v4.9)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
@@ -571,7 +571,6 @@
             if (audioState === 'idle') {
                 audioState = 'rampingUp';
                 createAudioNodes();
-                // Ramp up without oscillation
                 masterGainNode.gain.setValueAtTime(0.0001, now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
                 
@@ -588,15 +587,11 @@
                 audioState = 'interruptRamp';
                 clearAllTimeouts();
 
-                // Stop any current ramps or oscillations
                 masterGainNode.gain.cancelScheduledValues(now);
                 lfoGain.gain.cancelScheduledValues(now);
                 stopOscillation();
-
-                // Hold at current volume
                 masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
 
-                // After 1 sec, ramp back up (without oscillation)
                 scheduleTimeout(() => {
                      if (audioState === 'interruptRamp') {
                         audioState = 'rampingUp';
@@ -621,17 +616,17 @@
             decayEndTime = Date.now() + decayDuration * 1000;
             const now = audioContext.currentTime;
             
-            // Start oscillation and decay simultaneously
             startOscillation();
             
             masterGainNode.gain.setValueAtTime(targetVolume, now);
+            lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, now);
+            
             masterGainNode.gain.linearRampToValueAtTime(0.0001, now + decayDuration);
             lfoGain.gain.linearRampToValueAtTime(0, now + decayDuration);
             
             scheduleTimeout(cleanupAudioNodes, decayDuration * 1000 + 500);
         }
         
-        // --- Discrete Oscillation Functions ---
         function startOscillation() {
             if (lfoGain && masterGainNode && lfoGain.numberOfOutputs === 0) {
                 lfoGain.connect(masterGainNode.gain);
@@ -726,11 +721,11 @@
             let weightedSum = 0;
             for (const record of soundHistory) {
                 const age = now - record.timestamp;
-                const recencyWeight = 1.0 - (age / 5000) * 0.75; // Linear decay from 100% to 25%
+                const recencyWeight = 1.0 - (age / 5000) * 0.75;
                 weightedSum += record.level * recencyWeight;
             }
             
-            const MAX_SCORE = 20000; // Calibration constant
+            const MAX_SCORE = 20000;
             let scaledScore = (weightedSum / MAX_SCORE) * 100;
             
             const finalScore = scaledScore * sensitivityDiscount;
@@ -740,4 +735,5 @@
     </script>
 </body>
 </html>
+
 
