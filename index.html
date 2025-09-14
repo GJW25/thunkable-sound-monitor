@@ -244,7 +244,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v4.4)</button>
+        <button id="startButton">Start Monitoring (v4.5)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
@@ -362,8 +362,8 @@
         const returnButton = document.getElementById('returnButton');
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
-        const disturbanceTriggerLevel = 66; // Hardcoded trigger level
-        let sensitivityDiscount = 0.828; // Default for slider at 50% (33% to 133% range)
+        const disturbanceTriggerLevel = 66;
+        let sensitivityDiscount = 0.828;
         let targetVolume = 0.5;
         let decayDuration = 30;
         let rampPeriod = 10;
@@ -372,7 +372,7 @@
         let isMonitoring = false;
         let screensaverEnabled = true;
         let animationFrameId = null;
-        let soundHistory = []; // New: For weighted disturbance calculation
+        let soundHistory = [];
         let allTimeouts = [];
         let decayEndTime = null;
         let inactivityTimer = null;
@@ -434,7 +434,7 @@
             const newVolume = parseInt(e.target.value);
             targetVolume = newVolume / 100;
             volumeValueSpan.textContent = `${newVolume}%`;
-            if (masterGainNode && audioContext) {
+            if (masterGainNode && audioContext && audioState !== 'decaying') {
                 masterGainNode.gain.setTargetAtTime(targetVolume, audioContext.currentTime, 0.1);
             }
             if (lfoGain && audioContext) {
@@ -443,8 +443,7 @@
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
-            const sliderValue = parseInt(e.target.value); // 1-100
-            // Map 1-100 to a discount factor of 0.33-1.33
+            const sliderValue = parseInt(e.target.value);
             sensitivityDiscount = 0.33 + ((sliderValue - 1) / 99);
             sensitivityValueSpan.textContent = sliderValue;
         });
@@ -586,20 +585,18 @@
                     }
                 }, rampPeriod * 1000);
             }
-            else if (audioState === 'decaying') {
+            else if (['decaying', 'rampingUp'].includes(audioState)) {
                 audioState = 'holdingAfterInterrupt';
                 clearAllTimeouts();
 
                 masterGainNode.gain.cancelScheduledValues(now);
+                if (lfoGain.numberOfOutputs > 0) { try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {} }
                 masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
 
                 scheduleTimeout(() => {
                     if (audioState === 'holdingAfterInterrupt') {
                         audioState = 'rampingUp';
                         const rampUpStartTime = audioContext.currentTime;
-                        if (lfoGain.numberOfOutputs > 0) {
-                            lfoGain.gain.linearRampToValueAtTime(targetVolume * oscillationDepth, rampUpStartTime + rampPeriod);
-                        }
                         masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
                         
                         scheduleTimeout(() => {
