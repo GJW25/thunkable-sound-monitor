@@ -244,7 +244,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v4.5)</button>
+        <button id="startButton">Start Monitoring (v4.6)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
@@ -585,19 +585,23 @@
                     }
                 }, rampPeriod * 1000);
             }
-            else if (['decaying', 'rampingUp'].includes(audioState)) {
+            else if (['decaying', 'rampingUp', 'holdingAfterRampUp'].includes(audioState)) {
                 audioState = 'holdingAfterInterrupt';
                 clearAllTimeouts();
 
                 masterGainNode.gain.cancelScheduledValues(now);
-                if (lfoGain.numberOfOutputs > 0) { try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {} }
+                // Keep LFO connected, but cancel its ramp
+                lfoGain.gain.cancelScheduledValues(now);
                 masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
 
                 scheduleTimeout(() => {
                     if (audioState === 'holdingAfterInterrupt') {
                         audioState = 'rampingUp';
                         const rampUpStartTime = audioContext.currentTime;
+                        
+                        // Ramp both main gain and LFO gain back to their targets.
                         masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
+                        lfoGain.gain.linearRampToValueAtTime(targetVolume * oscillationDepth, rampUpStartTime + rampPeriod);
                         
                         scheduleTimeout(() => {
                             if (audioState === 'rampingUp') {
@@ -619,13 +623,13 @@
             decayEndTime = Date.now() + decayDuration * 1000;
             const now = audioContext.currentTime;
 
-            if (lfoGain.numberOfOutputs === 0) {
-                 lfoGain.connect(masterGainNode.gain);
-            }
+            // LFO is definitely connected here
             
             masterGainNode.gain.setValueAtTime(targetVolume, now);
             masterGainNode.gain.linearRampToValueAtTime(0.0001, now + decayDuration);
 
+            // Also ramp the LFO gain down to zero
+            lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, now);
             lfoGain.gain.linearRampToValueAtTime(0, now + decayDuration);
             
             scheduleTimeout(cleanupAudioNodes, (decayDuration + 1) * 1000);
@@ -651,6 +655,8 @@
             lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, audioContext.currentTime);
             lfoNode.connect(lfoGain);
 
+            // LFO is NOT connected to masterGainNode yet. This happens in startDecay.
+            
             whiteNoiseNode.start(audioContext.currentTime);
             lfoNode.start(audioContext.currentTime);
         }
@@ -727,4 +733,5 @@
     </script>
 </body>
 </html>
+
 
