@@ -210,7 +210,7 @@
             position: relative;
             display: inline-block;
         }
-        /* Custom Switch for Screensaver */
+        /* Custom Switch */
         .switch-group input[type="checkbox"] {
             position: relative;
             width: 40px;
@@ -311,6 +311,10 @@
                             </div>
                             <div class="tooltip" id="tooltip-ramp">How quickly the sound fades in to the target volume when activated.</div>
                         </div>
+                        <div class="control-group switch-group">
+                            <label for="oscillationToggle">Enable Oscillation</label>
+                            <input type="checkbox" id="oscillationToggle" checked>
+                        </div>
                         <div class="control-group">
                             <label for="oscillationSlider">Oscillation Period: <span id="oscillationValue">9s</span></label>
                             <div class="slider-container">
@@ -346,6 +350,7 @@
         const sensitivitySlider = document.getElementById('sensitivitySlider');
         const durationSlider = document.getElementById('durationSlider');
         const rampSlider = document.getElementById('rampSlider');
+        const oscillationToggle = document.getElementById('oscillationToggle');
         const oscillationSlider = document.getElementById('oscillationSlider');
         const oscillationDepthSlider = document.getElementById('oscillationDepthSlider');
         const screensaverToggle = document.getElementById('screensaverToggle');
@@ -367,14 +372,14 @@
         let targetVolume = 0.5;
         let decayDuration = 30;
         let rampPeriod = 10;
+        let oscillationEnabled = true;
         let oscillationPeriod = 9;
         let oscillationDepth = 0.5;
         let isMonitoring = false;
         let screensaverEnabled = true;
         let animationFrameId = null;
         let soundHistory = [];
-        let allTimeouts = [];
-        let decayEndTime = null;
+        let decayStartTime = null;
         let inactivityTimer = null;
         let isMicActive = false;
         
@@ -385,8 +390,6 @@
         let analyser;
         let dataArray;
         let whiteNoiseNode = null;
-        let lfoNode = null;
-        let lfoGain = null;
         let masterGainNode = null;
         let audioState = 'idle';
 
@@ -403,10 +406,8 @@
         });
 
         returnButton.addEventListener('click', resetInactivityTimer);
-        screensaverToggle.addEventListener('change', (e) => {
-            screensaverEnabled = e.target.checked;
-            resetInactivityTimer();
-        });
+        screensaverToggle.addEventListener('change', (e) => screensaverEnabled = e.target.checked);
+        oscillationToggle.addEventListener('change', (e) => oscillationEnabled = e.target.checked);
 
         document.querySelectorAll('.info-icon').forEach(icon => {
             const tooltipId = icon.getAttribute('data-tooltip-id');
@@ -416,14 +417,10 @@
                 e.stopPropagation();
                 const isVisible = tooltip.classList.contains('show');
                 document.querySelectorAll('.tooltip.show').forEach(t => t.classList.remove('show'));
-                if (!isVisible) {
-                    tooltip.classList.add('show');
-                }
+                if (!isVisible) tooltip.classList.add('show');
             });
         });
-        document.addEventListener('click', () => {
-            document.querySelectorAll('.tooltip.show').forEach(t => t.classList.remove('show'));
-        });
+        document.addEventListener('click', () => document.querySelectorAll('.tooltip.show').forEach(t => t.classList.remove('show')));
 
 
         [volumeSlider, sensitivitySlider, durationSlider, rampSlider, oscillationSlider, oscillationDepthSlider].forEach(slider => {
@@ -431,15 +428,8 @@
         });
 
         volumeSlider.addEventListener('input', (e) => {
-            const newVolume = parseInt(e.target.value);
-            targetVolume = newVolume / 100;
-            volumeValueSpan.textContent = `${newVolume}%`;
-            if (masterGainNode && audioContext && audioState !== 'decaying') {
-                masterGainNode.gain.setTargetAtTime(targetVolume, audioContext.currentTime, 0.1);
-            }
-            if (lfoGain && audioContext) {
-                lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
-            }
+            targetVolume = parseInt(e.target.value) / 100;
+            volumeValueSpan.textContent = `${e.target.value}%`;
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
@@ -465,18 +455,11 @@
         oscillationSlider.addEventListener('input', (e) => {
             oscillationPeriod = parseInt(e.target.value);
             oscillationValueSpan.textContent = `${oscillationPeriod}s`;
-            if (lfoNode) {
-                lfoNode.frequency.setTargetAtTime(1 / oscillationPeriod, audioContext.currentTime, 0.1);
-            }
         });
 
         oscillationDepthSlider.addEventListener('input', (e) => {
-            const depthPercentage = parseInt(e.target.value);
-            oscillationDepth = depthPercentage / 100;
-            oscillationDepthValueSpan.textContent = `${depthPercentage}%`;
-            if(lfoGain) {
-                lfoGain.gain.setTargetAtTime(targetVolume * oscillationDepth, audioContext.currentTime, 0.5);
-            }
+            oscillationDepth = parseInt(e.target.value) / 100;
+            oscillationDepthValueSpan.textContent = `${e.target.value}%`;
         });
 
 
@@ -484,26 +467,16 @@
         async function initializeMicrophone() {
              try {
                 audioContext = new AudioContext();
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { 
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }, 
-                    video: false 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
                 streamSource = stream;
-                
                 mediaStreamSource = audioContext.createMediaStreamSource(stream);
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 256;
                 mediaStreamSource.connect(analyser);
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
-
                 isMicActive = true;
-                mainLoop(); // Start continuous analysis
+                mainLoop();
                 startPlaybackAndMonitoring();
-
             } catch (err) {
                 console.error('Error:', err);
                 startButton.textContent = "Mic Error - Refresh";
@@ -521,12 +494,9 @@
         function stopPlaybackAndMonitoring() {
             isMonitoring = false;
             cleanupAudioNodes();
-            if (inactivityTimer) {
-                clearTimeout(inactivityTimer);
-                inactivityTimer = null;
-            }
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            inactivityTimer = null;
             hideScreensaver();
-            
             decayEndTime = null;
             startButton.textContent = `Start Monitoring`;
             startButton.style.backgroundColor = '#00796B';
@@ -545,17 +515,15 @@
             const disturbanceLevel = calculateDisturbanceLevel();
             document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
             
-            if (isMonitoring) {
-                 if (disturbanceLevel > disturbanceTriggerLevel) {
-                    triggerSoundPlayback();
-                }
+            if (isMonitoring && disturbanceLevel > disturbanceTriggerLevel) {
+                triggerSoundPlayback();
             }
 
-            if (audioState === 'decaying' && decayEndTime) {
+            if (audioState === 'decaying') {
+                updateDecayVolume();
                 const remaining = Math.max(0, (decayEndTime - Date.now()) / 1000);
-                const displayTime = Math.round(remaining / 5) * 5;
-                activationStatus.textContent = `Time Remaining: ${displayTime}s`;
-            } else if (audioState !== 'idle' && audioState !== 'decaying') {
+                activationStatus.textContent = `Time Remaining: ${Math.round(remaining)}s`;
+            } else if (audioState !== 'idle') {
                 activationStatus.textContent = 'Activated';
             } else {
                 activationStatus.textContent = '-';
@@ -564,48 +532,33 @@
             animationFrameId = requestAnimationFrame(mainLoop);
         }
 
-        // --- SECTION 6: SMOOTH AUDIO ENGINE (REWRITTEN) ---
+        // --- SECTION 6: NEW AUDIO ENGINE ---
         function triggerSoundPlayback() {
             const now = audioContext.currentTime;
             
             if (audioState === 'idle') {
                 audioState = 'rampingUp';
                 createAudioNodes();
+                masterGainNode.gain.cancelScheduledValues(now);
                 masterGainNode.gain.setValueAtTime(0.0001, now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
-                
-                scheduleTimeout(() => {
-                    if (audioState === 'rampingUp') {
-                        audioState = 'holding';
-                        scheduleTimeout(() => {
-                            if (audioState === 'holding') startDecay();
-                        }, 1000);
-                    }
-                }, rampPeriod * 1000);
+                setTimeout(() => {
+                    if (audioState === 'rampingUp') startDecay();
+                }, (rampPeriod + 1) * 1000);
             }
-            else if (['decaying', 'rampingUp', 'holding'].includes(audioState)) {
+            else if (['decaying', 'rampingUp'].includes(audioState)) {
                 audioState = 'interruptRamp';
-                clearAllTimeouts();
-
                 masterGainNode.gain.cancelScheduledValues(now);
-                lfoGain.gain.cancelScheduledValues(now);
-                stopOscillation();
-                masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
-
-                scheduleTimeout(() => {
+                const currentVolume = masterGainNode.gain.value;
+                setTimeout(() => {
                      if (audioState === 'interruptRamp') {
                         audioState = 'rampingUp';
                         const rampUpStartTime = audioContext.currentTime;
+                        masterGainNode.gain.setValueAtTime(currentVolume, rampUpStartTime);
                         masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
-                        
-                        scheduleTimeout(() => {
-                            if (audioState === 'rampingUp') {
-                                audioState = 'holding';
-                                scheduleTimeout(() => {
-                                    if (audioState === 'holding') startDecay();
-                                }, 1000);
-                            }
-                        }, rampPeriod * 1000);
+                        setTimeout(() => {
+                            if (audioState === 'rampingUp') startDecay();
+                        }, (rampPeriod + 1) * 1000);
                     }
                 }, 1000);
             }
@@ -613,36 +566,39 @@
         
         function startDecay() {
             audioState = 'decaying';
-            decayEndTime = Date.now() + decayDuration * 1000;
-            const now = audioContext.currentTime;
-            
-            startOscillation();
-            
-            masterGainNode.gain.setValueAtTime(targetVolume, now);
-            lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, now);
-            
-            masterGainNode.gain.linearRampToValueAtTime(0.0001, now + decayDuration);
-            lfoGain.gain.linearRampToValueAtTime(0, now + decayDuration);
-            
-            scheduleTimeout(cleanupAudioNodes, decayDuration * 1000 + 500);
-        }
-        
-        function startOscillation() {
-            if (lfoGain && masterGainNode && lfoGain.numberOfOutputs === 0) {
-                lfoGain.connect(masterGainNode.gain);
-            }
+            decayStartTime = Date.now();
+            decayEndTime = decayStartTime + decayDuration * 1000;
         }
 
-        function stopOscillation() {
-             if (lfoGain && lfoGain.numberOfOutputs > 0) {
-                try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {}
+        function updateDecayVolume() {
+            if (audioState !== 'decaying') return;
+
+            const now = Date.now();
+            const elapsedTime = (now - decayStartTime) / 1000;
+            
+            if (elapsedTime >= decayDuration) {
+                cleanupAudioNodes();
+                return;
+            }
+
+            const decayProgress = elapsedTime / decayDuration;
+            const baseVolume = targetVolume * (1 - decayProgress);
+
+            let finalVolume = baseVolume;
+            if (oscillationEnabled) {
+                const sineValue = Math.sin((now / 1000) * 2 * Math.PI / oscillationPeriod);
+                const oscillationAmount = baseVolume * oscillationDepth * sineValue;
+                finalVolume += oscillationAmount;
+            }
+            
+            if (masterGainNode) {
+                 masterGainNode.gain.value = Math.max(0, finalVolume);
             }
         }
 
         function createAudioNodes() {
             masterGainNode = audioContext.createGain();
             masterGainNode.connect(audioContext.destination);
-
             whiteNoiseNode = audioContext.createBufferSource();
             const bufferSize = 2 * audioContext.sampleRate;
             const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
@@ -651,26 +607,13 @@
             whiteNoiseNode.buffer = noiseBuffer;
             whiteNoiseNode.loop = true;
             whiteNoiseNode.connect(masterGainNode);
-
-            lfoNode = audioContext.createOscillator();
-            lfoNode.type = 'sine';
-            lfoNode.frequency.setValueAtTime(1 / oscillationPeriod, audioContext.currentTime);
-            lfoGain = audioContext.createGain();
-            lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, audioContext.currentTime);
-            lfoNode.connect(lfoGain);
-            
             whiteNoiseNode.start(audioContext.currentTime);
-            lfoNode.start(audioContext.currentTime);
         }
 
         function cleanupAudioNodes() {
-            clearAllTimeouts(); 
-            decayEndTime = null;
             if (whiteNoiseNode) { try { whiteNoiseNode.stop(0); whiteNoiseNode.disconnect(); } catch (e) {} }
-            if (lfoNode) { try { lfoNode.stop(0); lfoNode.disconnect(); } catch (e) {} }
             if (masterGainNode) { try { masterGainNode.disconnect(); } catch (e) {} }
-            if (lfoGain) { try { lfoGain.disconnect(); } catch (e) {} }
-            whiteNoiseNode = lfoNode = lfoGain = masterGainNode = null;
+            whiteNoiseNode = masterGainNode = null;
             audioState = 'idle';
         }
         
@@ -691,17 +634,6 @@
         function hideScreensaver() {
             screensaver.style.opacity = '0';
             setTimeout(() => screensaver.style.display = 'none', 500);
-        }
-
-        function scheduleTimeout(callback, delay) {
-            const id = setTimeout(callback, delay);
-            allTimeouts.push(id);
-            return id;
-        }
-
-        function clearAllTimeouts() {
-            allTimeouts.forEach(clearTimeout);
-            allTimeouts = [];
         }
 
         function calculateLogVolume(dataArray) {
