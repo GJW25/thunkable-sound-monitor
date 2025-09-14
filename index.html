@@ -244,7 +244,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v4.2)</button>
+        <button id="startButton">Start Monitoring (v4.3)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
@@ -279,7 +279,7 @@
                                 <input type="range" id="sensitivitySlider" min="1" max="100" value="50">
                                 <span class="info-icon" data-tooltip-id="tooltip-sensitivity">?</span>
                             </div>
-                            <div class="tooltip" id="tooltip-sensitivity">Adjusts microphone sensitivity. Higher values make it easier for quieter sounds to register as a disturbance.</div>
+                            <div class="tooltip" id="tooltip-sensitivity">Adjusts the final disturbance score. Lower values reduce the score, making the system less reactive.</div>
                         </div>
                         <div class="control-group">
                             <label for="volumeSlider">Volume: <span id="volumeValue">50%</span></label>
@@ -363,7 +363,7 @@
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         const disturbanceTriggerLevel = 66; // Hardcoded trigger level
-        let sensitivityThreshold = 50;
+        let sensitivityDiscount = 0.75; // Default for slider at 50%
         let targetVolume = 0.5;
         let decayDuration = 30;
         let rampPeriod = 10;
@@ -372,7 +372,7 @@
         let isMonitoring = false;
         let screensaverEnabled = true;
         let animationFrameId = null;
-        let breachRecords = [];
+        let soundHistory = []; // New: For weighted disturbance calculation
         let allTimeouts = [];
         let decayEndTime = null;
         let inactivityTimer = null;
@@ -443,8 +443,8 @@
         });
 
         sensitivitySlider.addEventListener('input', (e) => {
-            const sliderValue = parseInt(e.target.value);
-            sensitivityThreshold = 60 - ((sliderValue - 1) * (20 / 99));
+            const sliderValue = parseInt(e.target.value); // 1-100
+            sensitivityDiscount = 0.5 + ((sliderValue - 1) / 99) * 0.5;
             sensitivityValueSpan.textContent = sliderValue;
         });
         
@@ -527,7 +527,6 @@
             }
             hideScreensaver();
             
-            breachRecords = [];
             decayEndTime = null;
             startButton.textContent = `Start Monitoring`;
             startButton.style.backgroundColor = '#00796B';
@@ -541,8 +540,9 @@
             
             const scaledVolume = calculateLogVolume(dataArray);
             soundLevelValue.textContent = scaledVolume;
+            soundHistory.push({ timestamp: Date.now(), level: scaledVolume });
             
-            const disturbanceLevel = calculateDisturbanceLevel(scaledVolume);
+            const disturbanceLevel = calculateDisturbanceLevel();
             document.getElementById('soundBar').style.height = `${disturbanceLevel}%`;
             
             if (isMonitoring) {
@@ -590,15 +590,15 @@
                 clearAllTimeouts();
 
                 masterGainNode.gain.cancelScheduledValues(now);
-                // Oscillation is already running, so we keep it connected
                 masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
 
                 scheduleTimeout(() => {
                     if (audioState === 'holdingAfterInterrupt') {
                         audioState = 'rampingUp';
                         const rampUpStartTime = audioContext.currentTime;
-                        // Re-engage oscillation gain to full strength
-                        lfoGain.gain.linearRampToValueAtTime(targetVolume * oscillationDepth, rampUpStartTime + rampPeriod);
+                        if (lfoGain.numberOfOutputs > 0) { // If it was oscillating, ensure it continues
+                            lfoGain.gain.linearRampToValueAtTime(targetVolume * oscillationDepth, rampUpStartTime + rampPeriod);
+                        }
                         masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
                         
                         scheduleTimeout(() => {
@@ -621,7 +621,6 @@
             decayEndTime = Date.now() + decayDuration * 1000;
             const now = audioContext.currentTime;
 
-            // Ensure oscillation is running before starting decay
             if (lfoGain.numberOfOutputs === 0) {
                  lfoGain.connect(masterGainNode.gain);
             }
@@ -706,28 +705,29 @@
             return Math.min(100, Math.round(25 * Math.log(rawVolume + 1)));
         }
 
-        function calculateDisturbanceLevel(currentVolume) {
-            if (currentVolume > sensitivityThreshold) {
-                breachRecords.push({ timestamp: Date.now(), magnitude: currentVolume - sensitivityThreshold });
-            }
-
+        function calculateDisturbanceLevel() {
             const now = Date.now();
-            const tenSecondsAgo = now - 10000;
-            breachRecords = breachRecords.filter(record => record.timestamp > tenSecondsAgo);
-            if (breachRecords.length === 0) { return 0; }
-            let totalScore = 0;
-            for (const record of breachRecords) {
-                const recencyWeight = (record.timestamp - tenSecondsAgo) / 10000;
-                totalScore += record.magnitude * recencyWeight;
+            const fiveSecondsAgo = now - 5000;
+            soundHistory = soundHistory.filter(record => record.timestamp > fiveSecondsAgo);
+            
+            if (soundHistory.length === 0) return 0;
+
+            let weightedSum = 0;
+            for (const record of soundHistory) {
+                const age = now - record.timestamp;
+                const recencyWeight = 1.0 - (age / 5000) * 0.75; // Linear decay from 100% to 25%
+                weightedSum += record.level * recencyWeight;
             }
-            const scoreAsPercentage = Math.min(1.0, totalScore / 5000);
-            const curvedScore = Math.pow(scoreAsPercentage, 2.0);
-            return Math.round(curvedScore * 100);
+            
+            const MAX_SCORE = 20000; // Calibration constant
+            let scaledScore = (weightedSum / MAX_SCORE) * 100;
+            
+            const finalScore = scaledScore * sensitivityDiscount;
+            
+            return Math.min(100, Math.round(finalScore));
         }
     </script>
 </body>
 </html>
-
-
 
 
