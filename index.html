@@ -244,7 +244,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v4.3)</button>
+        <button id="startButton">Start Monitoring (v4.4)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
@@ -363,7 +363,7 @@
 
         // --- SECTION 2: CONFIGURATION & STATE VARIABLES ---
         const disturbanceTriggerLevel = 66; // Hardcoded trigger level
-        let sensitivityDiscount = 0.75; // Default for slider at 50%
+        let sensitivityDiscount = 0.828; // Default for slider at 50% (33% to 133% range)
         let targetVolume = 0.5;
         let decayDuration = 30;
         let rampPeriod = 10;
@@ -444,7 +444,8 @@
 
         sensitivitySlider.addEventListener('input', (e) => {
             const sliderValue = parseInt(e.target.value); // 1-100
-            sensitivityDiscount = 0.5 + ((sliderValue - 1) / 99) * 0.5;
+            // Map 1-100 to a discount factor of 0.33-1.33
+            sensitivityDiscount = 0.33 + ((sliderValue - 1) / 99);
             sensitivityValueSpan.textContent = sliderValue;
         });
         
@@ -596,7 +597,7 @@
                     if (audioState === 'holdingAfterInterrupt') {
                         audioState = 'rampingUp';
                         const rampUpStartTime = audioContext.currentTime;
-                        if (lfoGain.numberOfOutputs > 0) { // If it was oscillating, ensure it continues
+                        if (lfoGain.numberOfOutputs > 0) {
                             lfoGain.gain.linearRampToValueAtTime(targetVolume * oscillationDepth, rampUpStartTime + rampPeriod);
                         }
                         masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
@@ -729,5 +730,4 @@
     </script>
 </body>
 </html>
-
 
