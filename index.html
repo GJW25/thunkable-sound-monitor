@@ -244,7 +244,7 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v5.0)</button>
+        <button id="startButton">Start Monitoring (v5.2)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
@@ -267,7 +267,7 @@
             <div class="controls">
                 <div class="control-group switch-group">
                     <label for="screensaverToggle">Enable Screensaver</label>
-                    <input type="checkbox" id="screensaverToggle" checked>
+                    <input type="checkbox" id="screensaverToggle">
                 </div>
                 
                 <details class="settings-group" open>
@@ -297,12 +297,6 @@
                             </div>
                             <div class="tooltip" id="tooltip-duration">How long the white noise will gently fade out for after it has been activated and the disturbance ends.</div>
                         </div>
-                    </div>
-                </details>
-
-                <details class="settings-group">
-                    <summary>Advanced Settings</summary>
-                    <div class="details-content">
                         <div class="control-group">
                             <label for="rampSlider">Ramp Period: <span id="rampValue">10s</span></label>
                             <div class="slider-container">
@@ -311,6 +305,12 @@
                             </div>
                             <div class="tooltip" id="tooltip-ramp">How quickly the sound fades in to the target volume when activated.</div>
                         </div>
+                    </div>
+                </details>
+
+                <details class="settings-group">
+                    <summary>Advanced Settings</summary>
+                    <div class="details-content">
                         <div class="control-group switch-group">
                             <label for="oscillationToggle">Enable Oscillation</label>
                             <input type="checkbox" id="oscillationToggle" checked>
@@ -376,10 +376,12 @@
         let oscillationPeriod = 9;
         let oscillationDepth = 0.5;
         let isMonitoring = false;
-        let screensaverEnabled = true;
+        let screensaverEnabled = false;
         let animationFrameId = null;
         let soundHistory = [];
         let decayStartTime = null;
+        let rampStartTime = null;
+        let rampStartVolume = 0;
         let inactivityTimer = null;
         let isMicActive = false;
         
@@ -505,7 +507,6 @@
 
         function mainLoop() {
             if (!isMicActive) return;
-
             analyser.getByteFrequencyData(dataArray);
             
             const scaledVolume = calculateLogVolume(dataArray);
@@ -519,8 +520,14 @@
                 triggerSoundPlayback();
             }
 
-            if (audioState === 'decaying') {
+            // Update volume based on state
+            if (audioState === 'rampingUp') {
+                updateRampUpVolume();
+            } else if (audioState === 'decaying') {
                 updateDecayVolume();
+            }
+
+            if (audioState === 'decaying' && decayEndTime) {
                 const remaining = Math.max(0, (decayEndTime - Date.now()) / 1000);
                 activationStatus.textContent = `Time Remaining: ${Math.round(remaining)}s`;
             } else if (audioState !== 'idle') {
@@ -528,42 +535,43 @@
             } else {
                 activationStatus.textContent = '-';
             }
-
             animationFrameId = requestAnimationFrame(mainLoop);
         }
 
         // --- SECTION 6: NEW AUDIO ENGINE ---
         function triggerSoundPlayback() {
-            const now = audioContext.currentTime;
-            
+            if (audioState === 'rampingUp') {
+                rampStartTime = Date.now();
+                rampStartVolume = masterGainNode.gain.value;
+                return;
+            }
+
             if (audioState === 'idle') {
                 audioState = 'rampingUp';
                 createAudioNodes();
-                masterGainNode.gain.cancelScheduledValues(now);
-                masterGainNode.gain.setValueAtTime(0.0001, now);
-                masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
-                setTimeout(() => {
-                    if (audioState === 'rampingUp') startDecay();
-                }, (rampPeriod + 1) * 1000);
-            }
-            else if (['decaying', 'rampingUp'].includes(audioState)) {
-                audioState = 'interruptRamp';
-                masterGainNode.gain.cancelScheduledValues(now);
-                const currentVolume = masterGainNode.gain.value;
-                setTimeout(() => {
-                     if (audioState === 'interruptRamp') {
-                        audioState = 'rampingUp';
-                        const rampUpStartTime = audioContext.currentTime;
-                        masterGainNode.gain.setValueAtTime(currentVolume, rampUpStartTime);
-                        masterGainNode.gain.linearRampToValueAtTime(targetVolume, rampUpStartTime + rampPeriod);
-                        setTimeout(() => {
-                            if (audioState === 'rampingUp') startDecay();
-                        }, (rampPeriod + 1) * 1000);
-                    }
-                }, 1000);
+                rampStartTime = Date.now();
+                rampStartVolume = 0;
+            } else if (audioState === 'decaying') {
+                audioState = 'rampingUp';
+                rampStartTime = Date.now();
+                rampStartVolume = masterGainNode.gain.value;
             }
         }
         
+        function updateRampUpVolume() {
+            if (audioState !== 'rampingUp') return;
+            const elapsedTime = (Date.now() - rampStartTime) / 1000;
+            if (elapsedTime >= rampPeriod) {
+                startDecay();
+                return;
+            }
+            const rampProgress = elapsedTime / rampPeriod;
+            const currentRampVolume = rampStartVolume + (targetVolume - rampStartVolume) * rampProgress;
+            if (masterGainNode) {
+                masterGainNode.gain.value = Math.max(0, currentRampVolume);
+            }
+        }
+
         function startDecay() {
             audioState = 'decaying';
             decayStartTime = Date.now();
@@ -586,7 +594,8 @@
 
             let finalVolume = baseVolume;
             if (oscillationEnabled) {
-                const sineValue = Math.sin((now / 1000) * 2 * Math.PI / oscillationPeriod);
+                // Use elapsedTime to ensure sine starts at 0
+                const sineValue = Math.sin(elapsedTime * 2 * Math.PI / oscillationPeriod);
                 const oscillationAmount = baseVolume * oscillationDepth * sineValue;
                 finalVolume += oscillationAmount;
             }
@@ -667,5 +676,6 @@
     </script>
 </body>
 </html>
+
 
 
