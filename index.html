@@ -244,14 +244,14 @@
 </head>
 <body>
     <div id="mainContainer">
-        <button id="startButton">Start Monitoring (v4.7)</button>
+        <button id="startButton">Start Monitoring (v4.8)</button>
         <div id="mainContent" style="width: 100%;">
             <div style="position: relative;">
                 <h2>
                     Noise Disturbance 
                     <span class="info-icon" data-tooltip-id="tooltip-disturbance">?</span>
                 </h2>
-                <div class="tooltip" id="tooltip-disturbance">Disturbance is a combination of the volume and duration of recent sounds that exceed the sensitivity threshold.</div>
+                <div class="tooltip" id="tooltip-disturbance">Disturbance is a combination of the volume and duration of recent sounds.</div>
             </div>
 
             <div id="displayArea">
@@ -571,6 +571,7 @@
             if (audioState === 'idle') {
                 audioState = 'rampingUp';
                 createAudioNodes();
+                // Ramp up without oscillation
                 masterGainNode.gain.setValueAtTime(0.0001, now);
                 masterGainNode.gain.linearRampToValueAtTime(targetVolume, now + rampPeriod);
                 
@@ -587,13 +588,15 @@
                 audioState = 'interruptRamp';
                 clearAllTimeouts();
 
+                // Stop any current ramps or oscillations
                 masterGainNode.gain.cancelScheduledValues(now);
                 lfoGain.gain.cancelScheduledValues(now);
-                
-                if (lfoGain.numberOfOutputs > 0) lfoGain.disconnect(masterGainNode.gain);
+                stopOscillation();
 
+                // Hold at current volume
                 masterGainNode.gain.setValueAtTime(masterGainNode.gain.value, now);
 
+                // After 1 sec, ramp back up (without oscillation)
                 scheduleTimeout(() => {
                      if (audioState === 'interruptRamp') {
                         audioState = 'rampingUp';
@@ -618,26 +621,38 @@
             decayEndTime = Date.now() + decayDuration * 1000;
             const now = audioContext.currentTime;
             
-            lfoGain.connect(masterGainNode.gain);
+            // Start oscillation and decay simultaneously
+            startOscillation();
             
             masterGainNode.gain.setValueAtTime(targetVolume, now);
-            lfoGain.gain.setValueAtTime(targetVolume * oscillationDepth, now);
-            
             masterGainNode.gain.linearRampToValueAtTime(0.0001, now + decayDuration);
             lfoGain.gain.linearRampToValueAtTime(0, now + decayDuration);
             
             scheduleTimeout(cleanupAudioNodes, decayDuration * 1000 + 500);
+        }
+        
+        // --- Discrete Oscillation Functions ---
+        function startOscillation() {
+            if (lfoGain && masterGainNode && lfoGain.numberOfOutputs === 0) {
+                lfoGain.connect(masterGainNode.gain);
+            }
+        }
+
+        function stopOscillation() {
+             if (lfoGain && lfoGain.numberOfOutputs > 0) {
+                try { lfoGain.disconnect(masterGainNode.gain); } catch(e) {}
+            }
         }
 
         function createAudioNodes() {
             masterGainNode = audioContext.createGain();
             masterGainNode.connect(audioContext.destination);
 
+            whiteNoiseNode = audioContext.createBufferSource();
             const bufferSize = 2 * audioContext.sampleRate;
             const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
             const output = noiseBuffer.getChannelData(0);
             for (let i = 0; i < bufferSize; i++) { output[i] = Math.random() * 2 - 1; }
-            whiteNoiseNode = audioContext.createBufferSource();
             whiteNoiseNode.buffer = noiseBuffer;
             whiteNoiseNode.loop = true;
             whiteNoiseNode.connect(masterGainNode);
@@ -725,5 +740,4 @@
     </script>
 </body>
 </html>
-
 
